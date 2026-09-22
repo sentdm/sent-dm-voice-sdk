@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
+import ts from 'typescript';
 import * as errors from '@sentdm/voice/errors';
 
 const distDir = path.resolve(__dirname, '..', 'dist');
@@ -59,4 +61,18 @@ console.log(JSON.stringify(result));`,
       expect(result).toEqual(Object.fromEntries(subclassNames.map((name) => [name, true])));
     },
   );
+
+  test('adapter types are not reachable from any public entry point', () => {
+    const { exports } = JSON.parse(fs.readFileSync(path.join(distDir, 'package.json'), 'utf8')) as {
+      exports: Record<string, { require: { types: string }; types: string }>;
+    };
+    const declarations = Object.values(exports).flatMap((entry) => [entry.require.types, entry.types]);
+    const program = ts.createProgram(
+      declarations.map((declaration) => path.join(distDir, declaration)),
+      { module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext },
+    );
+    const reached = program.getSourceFiles().map((file) => path.relative(distDir, file.fileName));
+
+    expect(reached.filter((file) => file.startsWith('adapter/'))).toEqual([]);
+  });
 });

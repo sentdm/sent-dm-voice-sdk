@@ -1,0 +1,62 @@
+import type { AdapterFactory, CallEvent, CallTarget, ProviderAdapter } from '@sentdm/voice/adapter/types';
+
+const prefix = '0f8fad5b-d9cb-469f-a165-70867728950e';
+const phone: CallTarget = { kind: 'number', number: '+38349111222' };
+
+export function describeSharedAdapterTests(name: string, createAdapter: AdapterFactory): void {
+  describe(`${name} shared tests`, () => {
+    let adapter: ProviderAdapter;
+
+    beforeEach(async () => {
+      adapter = await createAdapter();
+      await adapter.register('token');
+    });
+
+    test('register refreshes the token while registered and registers again after unregister', async () => {
+      await expect(adapter.register('refreshed token')).resolves.toBeUndefined();
+      await expect(adapter.unregister()).resolves.toBeUndefined();
+      await expect(adapter.register('token')).resolves.toBeUndefined();
+    });
+
+    test('calls to a user, a number and a room get distinct call ids', async () => {
+      const callIds = [
+        await adapter.call({ kind: 'user', id: `${prefix}=ben` }),
+        await adapter.call(phone),
+        await adapter.joinConference(`${prefix}=daily-standup`),
+      ];
+
+      expect(new Set(callIds).size).toBe(3);
+    });
+
+    test('hangup ends the call with a completed ended event', async () => {
+      const callId = await adapter.call(phone);
+      const ended = new Promise<CallEvent>((resolve) =>
+        adapter.onCallEvent((event) => {
+          if (event.callId === callId && event.type === 'ended') resolve(event);
+        }),
+      );
+
+      await adapter.hangup(callId);
+
+      expect(await ended).toEqual({ callId, type: 'ended', reason: 'completed' });
+    });
+
+    test('mute, sendDigits and getStats work on a live call', async () => {
+      const callId = await adapter.call(phone);
+
+      expect(() => adapter.mute(callId, true)).not.toThrow();
+      expect(() => adapter.mute(callId, false)).not.toThrow();
+      expect(() => adapter.sendDigits(callId, '123#')).not.toThrow();
+      await expect(adapter.getStats(callId)).resolves.toEqual({
+        jitter: expect.any(Number),
+        packetLoss: expect.any(Number),
+        rtt: expect.any(Number),
+      });
+    });
+
+    test('input and output devices can be set', async () => {
+      await expect(adapter.setInputDevice('microphone-id')).resolves.toBeUndefined();
+      await expect(adapter.setOutputDevice('speaker-id')).resolves.toBeUndefined();
+    });
+  });
+}
