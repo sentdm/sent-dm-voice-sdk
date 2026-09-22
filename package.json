@@ -1,0 +1,85 @@
+{
+  "name": "@sentdm/voice",
+  "version": "0.0.1",
+  "description": "The official TypeScript client SDK for Sent Voice",
+  "author": "Sent <support@sent.dm>",
+  "types": "dist/index.d.ts",
+  "main": "dist/index.js",
+  "type": "commonjs",
+  "repository": "github:sentdm/sent-dm-voice-sdk",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.30.1",
+  "files": [
+    "**/*"
+  ],
+  "private": true,
+  "scripts": {
+    "test": "./scripts/test",
+    "build": "./scripts/build",
+    "prepublishOnly": "echo 'to publish, run pnpm build && (cd dist; pnpm publish)' && exit 1",
+    "format": "./scripts/format",
+    "prepare": "if ./scripts/utils/check-is-in-git-install.sh; then ./scripts/build && ./scripts/utils/git-swap.sh; fi",
+    "lint": "./scripts/lint",
+    "fix": "./scripts/format"
+  },
+  "dependencies": {
+    "sinch-rtc": "2.49.11"
+  },
+  "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.0",
+    "@swc/core": "^1.3.102",
+    "@swc/jest": "^0.2.29",
+    "@types/jest": "^29.4.0",
+    "@types/node": "^20.17.6",
+    "@typescript-eslint/eslint-plugin": "8.70.1",
+    "@typescript-eslint/parser": "8.70.1",
+    "eslint": "^9.39.1",
+    "eslint-plugin-unused-imports": "^4.1.4",
+    "jest": "^29.4.0",
+    "prettier": "^3.0.0",
+    "publint": "^0.2.12",
+    "ts-jest": "^29.1.0",
+    "ts-node": "^10.5.0",
+    "tsc-multi": "https://github.com/stainless-api/tsc-multi/releases/download/v1.1.11/tsc-multi.tgz",
+    "tslib": "^2.8.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.70.1"
+  },
+  "overrides": {
+    "minimatch": "^9.0.5"
+  },
+  "pnpm": {
+    "overrides": {
+      "minimatch": "^9.0.5"
+    }
+  },
+  "resolutions": {
+    "minimatch": "^9.0.5"
+  },
+  "exports": {
+    ".": {
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./errors": {
+      "require": {
+        "types": "./dist/errors.d.ts",
+        "default": "./dist/errors.js"
+      },
+      "types": "./dist/errors.d.mts",
+      "default": "./dist/errors.mjs"
+    },
+    "./react": {
+      "require": {
+        "types": "./dist/react/index.d.ts",
+        "default": "./dist/react/index.js"
+      },
+      "types": "./dist/react/index.d.mts",
+      "default": "./dist/react/index.mjs"
+    }
+  }
+}

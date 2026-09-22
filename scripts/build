@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+
+set -exuo pipefail
+
+cd "$(dirname "$0")/.."
+
+node scripts/utils/check-version.cjs
+
+# Build into dist and will publish the package from there,
+# so that src/react/index.ts becomes <package root>/react/index.js
+# This way importing from `"@sentdm/voice/react"` works
+# even with `"moduleResolution": "node"`
+
+rm -rf dist; mkdir dist
+# Copy src to dist/src and build from dist/src into dist, so that
+# the source map for index.js.map will refer to ./src/index.ts etc
+cp -rp src README.md dist
+for file in LICENSE CHANGELOG.md; do
+  if [ -e "${file}" ]; then cp "${file}" dist; fi
+done
+# this converts the export map paths for the dist directory
+# and does a few other minor things
+node scripts/utils/make-dist-package-json.cjs > dist/package.json
+
+# build to .js/.mjs/.d.ts files
+./node_modules/.bin/tsc-multi
+cp tsconfig.dist-src.json dist/src/tsconfig.json
+
+node scripts/utils/postprocess-files.cjs
+
+# make sure that nothing crashes when we require the output CJS or
+# import the output ESM
+(cd dist && node -e 'require("@sentdm/voice")')
+(cd dist && node -e 'import("@sentdm/voice")' --input-type=module)
