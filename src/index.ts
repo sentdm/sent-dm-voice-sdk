@@ -1,3 +1,6 @@
+export { SentVoice as default } from './client';
+
+export { SentVoice, type SentVoiceOptions } from './client';
 export {
   SentVoiceError,
   TokenExpiredError,

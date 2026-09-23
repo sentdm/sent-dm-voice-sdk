@@ -1,4 +1,5 @@
 import * as root from '@sentdm/voice';
+import { SentVoice } from '@sentdm/voice/client';
 import {
   CallFailedError,
   CallRejectedError,
@@ -84,8 +85,10 @@ describe('error taxonomy', () => {
     expect(providerDetailIsUnknown).toBe(true);
   });
 
-  test('the root entry re-exports the same error classes', () => {
+  test('the root entry exports the client and re-exports the same error classes', () => {
     expect(root).toEqual({
+      default: SentVoice,
+      SentVoice,
       SentVoiceError,
       TokenExpiredError,
       TokenInvalidError,
