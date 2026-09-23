@@ -23,6 +23,7 @@ type StatsCall = Call & { getPeerConnectionStats(): Promise<RTCStatsReport | nul
 
 const environmentHost = 'ocra-euc1.api.sinch.com';
 const applicationPrefix = '//rtc.sinch.com/applications/';
+const answerThrottle = 1_500;
 
 const providerError = (error: unknown): SentVoiceError =>
   error instanceof SentVoiceError ? error : (
@@ -48,7 +49,12 @@ const guard = <T>(action: () => T): T => {
 };
 
 export const loadSinchAdapter: AdapterFactory = async (options) =>
-  new SinchAdapter(await import('sinch-rtc'), options);
+  new SinchAdapter(
+    await import('sinch-rtc').catch((error: unknown) => {
+      throw new NetworkError({ message: 'The calling provider could not be loaded.', providerDetail: error });
+    }),
+    options,
+  );
 
 class SinchAdapter implements ProviderAdapter {
   #sinch: Sinch;
@@ -58,6 +64,7 @@ class SinchAdapter implements ProviderAdapter {
   #inputDeviceId: string | undefined;
   #audio: HTMLAudioElement | undefined;
   #calls = new Map<string, Call>();
+  #answerRetryAt = new Map<string, number>();
   #incomingListeners: Array<(call: IncomingCall) => void> = [];
   #callEventListeners: Array<(event: CallEvent) => void> = [];
 
@@ -79,22 +86,21 @@ class SinchAdapter implements ProviderAdapter {
 
   async call(target: CallTarget): Promise<string> {
     const { callClient } = this.#started();
-    const placing =
-      target.kind === 'user' ? callClient.callUser(target.id) : callClient.callPhoneNumber(target.number);
-    const call = await placing.catch(rethrow);
-    this.#play(call);
-    return this.#track(call);
+    return this.#placed(
+      target.kind === 'user' ? callClient.callUser(target.id) : callClient.callPhoneNumber(target.number),
+    );
   }
 
   async joinConference(room: string): Promise<string> {
-    const call = await this.#started().callClient.callConference(room).catch(rethrow);
-    this.#play(call);
-    return this.#track(call);
+    return this.#placed(this.#started().callClient.callConference(room));
   }
 
   async answer(callId: string): Promise<void> {
+    const wait = (this.#answerRetryAt.get(callId) ?? 0) - Date.now();
+    if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
     const call = this.#calls.get(callId);
     if (!call) return;
+    this.#answerRetryAt.set(callId, Date.now() + answerThrottle);
     await call.answer().catch((error: unknown) => {
       throw new MediaPermissionError({ providerDetail: error });
     });
@@ -211,6 +217,16 @@ class SinchAdapter implements ProviderAdapter {
     return (this.#audio ??= this.#options.audioElement ?? new Audio());
   }
 
+  async #placed(placing: Promise<Call>): Promise<string> {
+    const call = await placing.catch(rethrow);
+    if (!call.outgoingStream?.getAudioTracks().length) {
+      guard(() => call.hangup());
+      throw new MediaPermissionError();
+    }
+    this.#play(call);
+    return this.#track(call);
+  }
+
   #play(call: Call): void {
     const audio = this.#playback();
     audio.autoplay = true;
@@ -234,6 +250,7 @@ class SinchAdapter implements ProviderAdapter {
       onCallEnded: () => {
         call.removeListener(listener);
         this.#calls.delete(call.id);
+        this.#answerRetryAt.delete(call.id);
         if (this.#audio && this.#audio.srcObject === call.incomingStream) this.#audio.srcObject = null;
         this.#emit(this.#ended(call));
       },

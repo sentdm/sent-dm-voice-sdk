@@ -47,6 +47,8 @@ describe('SinchAdapter', () => {
     await load();
   });
 
+  afterEach(() => jest.useRealTimers());
+
   test.each<[string, AdapterOptions['serviceWorker'], FakeClient['push']]>([
     ['the default service worker', undefined, [undefined, undefined]],
     [
@@ -256,6 +258,39 @@ describe('SinchAdapter', () => {
 
     await expect(answering).rejects.toBeInstanceOf(MediaPermissionError);
     await expect(answering).rejects.toMatchObject({ providerDetail: refused });
+  });
+
+  test('an answer retried within 1.5 s of a failed one waits until the provider accepts it again', async () => {
+    jest.useFakeTimers();
+    await adapter.register(voiceToken());
+    const call = lastClient().callClient.receiveCall(`${prefix}=ben`);
+    const answer = jest.spyOn(call, 'answer');
+    call.answerFailure = new Error('Could not get media tracks.');
+    await expect(adapter.answer(call.id)).rejects.toBeInstanceOf(MediaPermissionError);
+    call.answerFailure = undefined;
+
+    const answering = adapter.answer(call.id);
+    await jest.advanceTimersByTimeAsync(1_499);
+    expect(answer).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(1);
+    await answering;
+
+    expect(answer).toHaveBeenCalledTimes(2);
+    expect(events).toEqual([
+      { callId: call.id, type: 'answered' },
+      { callId: call.id, type: 'connected' },
+    ]);
+  });
+
+  test('a placed call that could not open the microphone is hung up and rejected with MediaPermissionError', async () => {
+    await adapter.register(voiceToken());
+    lastClient().callClient.microphoneDenied = true;
+
+    await expect(adapter.call(phone)).rejects.toBeInstanceOf(MediaPermissionError);
+
+    const call = [...calls.values()].pop()!;
+    expect(call.details.endCause).toBe(CallEndCause.Canceled);
+    expect(events).toEqual([]);
   });
 
   test('a call that has ended is not touched again, since the provider throws on a second hangup', async () => {

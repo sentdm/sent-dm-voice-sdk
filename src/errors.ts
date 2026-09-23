@@ -8,6 +8,7 @@ export type SentVoiceErrorCode =
   | 'NETWORK'
   | 'CAPABILITY_UNSUPPORTED'
   | 'INVALID_ADDRESS'
+  | 'CALL_IN_PROGRESS'
   | 'UNKNOWN';
 
 export type SentVoiceErrorCategory = 'auth' | 'media' | 'signaling' | 'network' | 'validation' | 'capability';

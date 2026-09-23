@@ -230,11 +230,10 @@ describe('telemetry', () => {
       { type: 'ended', reason: 'completed', after: 5_000 },
     ]);
     await client.connect({ to: 'ben' });
+    await jest.advanceTimersByTimeAsync(8_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     adapter.scriptNextCall([{ type: 'ringing' }, { type: 'ended', reason: 'busy', after: 4_000 }]);
     await client.connect({ to: '+38349123456' });
-
-    await jest.advanceTimersByTimeAsync(4_000);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
     await jest.advanceTimersByTimeAsync(4_000);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -242,10 +241,10 @@ describe('telemetry', () => {
       ['register.completed', undefined, expect.any(Object)],
       ['client.info', undefined, expect.any(Object)],
       ['call.started', 'mock-call-1', { direction: 'outbound' }],
-      ['call.started', 'mock-call-2', { direction: 'outbound' }],
       ['call.connected', 'mock-call-1', { direction: 'outbound', duration_ms: 3_000 }],
-      ['call.ended', 'mock-call-2', { direction: 'outbound', outcome: 'busy' }],
       ['call.ended', 'mock-call-1', { direction: 'outbound', outcome: 'completed', duration_ms: 5_000 }],
+      ['call.started', 'mock-call-2', { direction: 'outbound' }],
+      ['call.ended', 'mock-call-2', { direction: 'outbound', outcome: 'busy' }],
     ]);
   });
 
@@ -401,10 +400,12 @@ describe('telemetry', () => {
     const removePageListener = jest.spyOn(page, 'removeEventListener');
     const client = createClient();
     await client.register();
+    let invite!: SentVoice.CallInvite;
+    client.on('incomingCall', (received) => (invite = received));
     adapter.scriptNextCall([{ type: 'connected' }]);
     await client.connect({ to: 'ben' });
-    adapter.scriptNextCall([{ type: 'connected' }]);
-    await client.connect({ to: 'carol' });
+    adapter.receiveCall(`${prefix}=carol`);
+    await invite.accept();
     const getStats = jest.spyOn(adapter, 'getStats');
     jest.spyOn(adapter, 'hangup').mockResolvedValueOnce();
     await jest.advanceTimersByTimeAsync(10_000);

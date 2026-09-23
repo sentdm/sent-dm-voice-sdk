@@ -95,6 +95,14 @@ const destroyedError = () => new NotRegisteredError({ message: 'The client was d
 const invalidAddress = (message: string) =>
   new SentVoiceError({ code: 'INVALID_ADDRESS', category: 'validation', retriable: false, message });
 
+const callInProgress = () =>
+  new SentVoiceError({
+    code: 'CALL_IN_PROGRESS',
+    category: 'validation',
+    retriable: false,
+    message: 'A call is in progress or an incoming call is waiting; end or decline it first.',
+  });
+
 const numberPattern = /^\+[1-9]\d{1,14}$/;
 const namePattern = /^[A-Za-z0-9_-]+$/;
 const identityMaxLength = 200;
@@ -341,7 +349,10 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
   }
 
   async #loadAdapter(): Promise<ProviderAdapter> {
-    const adapter = await loadAdapter(this.#adapterOptions);
+    const adapter = await loadAdapter(this.#adapterOptions).catch((error: unknown) => {
+      this.#adapter = undefined;
+      throw error;
+    });
     adapter.onIncoming((incoming) => this.#onIncoming(adapter, incoming));
     adapter.onCallEvent((event) => this.#onCallEvent(event));
     this.#audioLifecycle?.loaded(adapter);
@@ -353,6 +364,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
     dial: (adapter: ProviderAdapter, prefix: string) => Promise<string>,
   ): Promise<Call> {
     const { adapter, token } = this.#session();
+    if (this.#busy()) throw callInProgress();
     const callId = await this.#reported(dial(adapter, token.prefix));
     if (this.#state === 'destroyed') {
       await adapter
@@ -379,6 +391,10 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
       throw this.#state === 'destroyed' ? destroyedError() : new NotRegisteredError();
     }
     return { adapter, token };
+  }
+
+  #busy(): boolean {
+    return this.#calls.length > 0 || [...this.#invites.values()].some((invite) => invite.state === 'pending');
   }
 
   #onIncoming(adapter: ProviderAdapter, { callId, from }: IncomingCall): void {

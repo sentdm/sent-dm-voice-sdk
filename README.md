@@ -75,7 +75,7 @@ The first `register()` asks the user to allow notifications, which the browser n
 
 - `register()` calls it and resolves once the client is `registered`. The client moves from `unregistered` to `registering` to `registered`, emitting each state as an event.
 - A token provider that throws or rejects is retried after a short backoff, 2 more times by default (`registerRetries`); `register()` then rejects with a `NetworkError`. A value that is not a voice token rejects with a `TokenInvalidError` at once.
-- The token is refreshed at 80% of its lifetime, and at least 30 seconds before it expires. `tokenWillExpire` fires first, then `tokenProvider` is called with the same retries. Nothing else changes for your app.
+- The token is refreshed at 80% of its lifetime, or 30 seconds before it expires if that is earlier, but never before half of its lifetime has passed. `tokenWillExpire` fires first, then `tokenProvider` is called with the same retries. Nothing else changes for your app.
 - If the retries run out, the client emits `error` with the cause and `offline` with a `TokenExpiredError`, then tries again about every 30 seconds until it is `registered` again; calling `register()` tries at once. Calls in progress go on, but `connect()` and `joinConference()` throw a `NotRegisteredError` while the client is offline.
 - `unregister()` stops receiving calls and leaves calls in progress alone. `destroy()` ends every call and tears the client down for good.
 
@@ -99,7 +99,7 @@ client.on('offline', (reason) => console.warn(`Offline (${reason.code}), trying 
 
 ## Calls
 
-`connect({ to })` calls a phone number in E.164 format, like `'+14155551234'`, or another user of your app by identity, like `'ben'`. `joinConference({ name })` joins one of your account's rooms, named with letters, digits, `-` and `_`, up to 27 characters. Either throws a `SentVoiceError` with code `INVALID_ADDRESS` when `to` or `name` does not fit. `to` says who the user wants to reach; your backend's answer decides what rings.
+`connect({ to })` calls a phone number in E.164 format, like `'+14155551234'`, or another user of your app by identity, like `'ben'`. `joinConference({ name })` joins one of your account's rooms, named with letters, digits, `-` and `_`, up to 27 characters. Either throws a `SentVoiceError` with code `INVALID_ADDRESS` when `to` or `name` does not fit, and one with code `CALL_IN_PROGRESS` while a call is in progress or an incoming call is still waiting for an answer: the SDK handles one call at a time. Both open the microphone, and reject with a `MediaPermissionError` when the user refuses. `to` says who the user wants to reach; your backend's answer decides what rings.
 
 ```ts
 import type SentVoice from '@sentdm/voice';
@@ -142,7 +142,7 @@ export function receiveCalls(client: SentVoice) {
 }
 ```
 
-`accept()` opens the microphone, asking for permission if needed, and resolves with the call. When the user refuses, it rejects with a `MediaPermissionError` and the invite stays pending, so the user can try again. `reject()` declines the call, and `cancelled` fires when the caller hangs up first. A call that arrives while another one is in progress is declined for you.
+The microphone opens when the call arrives, and `accept()` asks for permission again if that was refused, then resolves with the call. When the user refuses, it rejects with a `MediaPermissionError` and the invite stays pending, so the user can try again. `reject()` declines the call, and `cancelled` fires when the caller hangs up first. A call that arrives while another one is in progress is declined for you.
 
 ### Call quality and reconnection
 
@@ -187,18 +187,19 @@ export async function answer(invite: SentVoice.CallInvite) {
 }
 ```
 
-| Error                        | `code`                    | `category`   | When                                                                                                                |
-| ---------------------------- | ------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------- |
-| `TokenInvalidError`          | `TOKEN_INVALID`           | `auth`       | `register()`: the token provider returned something that is not a voice token                                       |
-| `TokenExpiredError`          | `TOKEN_EXPIRED`           | `auth`       | the `offline` event: the token could not be refreshed                                                               |
-| `NotRegisteredError`         | `NOT_REGISTERED`          | `validation` | `connect()` or `joinConference()` while not registered; registering, calling or choosing a device after `destroy()` |
-| `MediaPermissionError`       | `MEDIA_PERMISSION_DENIED` | `media`      | `accept()`: the microphone could not be opened                                                                      |
-| `CallFailedError`            | `CALL_FAILED`             | `signaling`  | `accept()` on a call that ended before it was answered                                                              |
-| `CallRejectedError`          | `CALL_REJECTED`           | `signaling`  | not raised yet: a call the other side declines ends as `busy`                                                       |
-| `NetworkError`               | `NETWORK`                 | `network`    | `register()`, when the token provider keeps failing; a call whose connection failed or was lost                     |
-| `CapabilityUnsupportedError` | `CAPABILITY_UNSUPPORTED`  | `capability` | `setOutputDevice()` where the browser cannot choose the speaker; listing devices over plain HTTP                    |
-| `SentVoiceError`             | `INVALID_ADDRESS`         | `validation` | `connect()` or `joinConference()` with a `to` or `name` that does not fit                                           |
-| `SentVoiceError`             | `UNKNOWN`                 | `signaling`  | anything else, such as `register()` failing because notifications are blocked                                       |
+| Error                        | `code`                    | `category`   | When                                                                                                                                     |
+| ---------------------------- | ------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `TokenInvalidError`          | `TOKEN_INVALID`           | `auth`       | `register()`: the token provider returned something that is not a voice token                                                            |
+| `TokenExpiredError`          | `TOKEN_EXPIRED`           | `auth`       | the `offline` event: the token could not be refreshed                                                                                    |
+| `NotRegisteredError`         | `NOT_REGISTERED`          | `validation` | `connect()` or `joinConference()` while not registered; registering, calling or choosing a device after `destroy()`                      |
+| `MediaPermissionError`       | `MEDIA_PERMISSION_DENIED` | `media`      | `connect()`, `joinConference()` or `accept()`: the microphone could not be opened                                                        |
+| `CallFailedError`            | `CALL_FAILED`             | `signaling`  | `accept()` on a call that ended before it was answered                                                                                   |
+| `CallRejectedError`          | `CALL_REJECTED`           | `signaling`  | not raised yet: a call the other side declines ends as `busy`                                                                            |
+| `NetworkError`               | `NETWORK`                 | `network`    | `register()`, when the token provider keeps failing or the calling provider cannot be loaded; a call whose connection failed or was lost |
+| `CapabilityUnsupportedError` | `CAPABILITY_UNSUPPORTED`  | `capability` | `setOutputDevice()` where the browser cannot choose the speaker; listing devices over plain HTTP                                         |
+| `SentVoiceError`             | `INVALID_ADDRESS`         | `validation` | `connect()` or `joinConference()` with a `to` or `name` that does not fit                                                                |
+| `SentVoiceError`             | `CALL_IN_PROGRESS`        | `validation` | `connect()` or `joinConference()` while a call is in progress or an incoming call is waiting for an answer                               |
+| `SentVoiceError`             | `UNKNOWN`                 | `signaling`  | anything else, such as `register()` failing because notifications are blocked                                                            |
 
 Errors that happen outside a method call arrive as events: the client's `error` when a token refresh fails, and a call's `error`, followed by `disconnected` with `{ state: 'failed', error }`. `providerDetail` keeps the underlying error, for your logs only.
 

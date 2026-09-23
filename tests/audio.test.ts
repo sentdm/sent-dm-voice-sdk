@@ -39,8 +39,16 @@ describe('AudioController', () => {
       telemetry: { disabled: true },
       ...options,
     });
-  const placeCall = (client: SentVoice) => client.connect({ to: 'ben' });
-  const receiveCall = () => adapter.receiveCall(`${prefix}=carol`);
+  const placeCall = async (client: SentVoice) => {
+    const call = await client.connect({ to: 'ben' });
+    await call.disconnect();
+  };
+  const receiveCall = async (client: SentVoice) => {
+    let invite!: SentVoice.CallInvite;
+    client.once('incomingCall', (received) => (invite = received));
+    adapter.receiveCall(`${prefix}=carol`);
+    await invite.reject();
+  };
 
   beforeEach(() => {
     jest.useFakeTimers();

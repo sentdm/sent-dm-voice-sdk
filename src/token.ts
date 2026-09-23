@@ -60,7 +60,7 @@ export function decodeToken(jwt: unknown): VoiceToken {
 
 export function refreshDelay({ issuedAt, expiresAt }: VoiceToken): number {
   const lifetime = expiresAt - issuedAt;
-  return Math.max(0, Math.min(lifetime * refreshShare, lifetime - refreshMargin));
+  return Math.max(Math.min(lifetime * refreshShare, lifetime - refreshMargin), lifetime / 2);
 }
 
 export function retryDelay(retry: number): number {

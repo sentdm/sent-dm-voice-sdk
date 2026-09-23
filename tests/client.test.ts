@@ -133,6 +133,20 @@ describe('SentVoice', () => {
     expect(jest.getTimerCount()).toBe(0);
   });
 
+  test('a provider that fails to load is loaded again by the next register', async () => {
+    const failure = new TypeError('Failed to fetch dynamically imported module');
+    jest.mocked(loadAdapter).mockRejectedValueOnce(failure);
+    const client = createClient();
+
+    await expect(client.register()).rejects.toBe(failure);
+    expect(client.state).toBe('unregistered');
+
+    await client.register();
+
+    expect(loadAdapter).toHaveBeenCalledTimes(2);
+    expect(client.state).toBe('registered');
+  });
+
   test('refresh fires at 80% of the lifetime, announces the expiry and re-registers with the new token', async () => {
     tokenProvider.mockImplementationOnce(async () => voiceToken());
     tokenProvider.mockImplementationOnce(async () => voiceToken({ 'sent:number': '+38349333444' }));
@@ -164,6 +178,17 @@ describe('SentVoice', () => {
     await client.register();
 
     await jest.advanceTimersByTimeAsync(69_999);
+    expect(tokenProvider).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(tokenProvider).toHaveBeenCalledTimes(2);
+  });
+
+  test('refresh never fires before half of the lifetime, so a short token is not refreshed at once', async () => {
+    tokenProvider.mockImplementationOnce(async () => voiceToken({ exp: Math.floor(Date.now() / 1000) + 20 }));
+    const client = createClient();
+    await client.register();
+
+    await jest.advanceTimersByTimeAsync(9_999);
     expect(tokenProvider).toHaveBeenCalledTimes(1);
     await jest.advanceTimersByTimeAsync(1);
     expect(tokenProvider).toHaveBeenCalledTimes(2);
@@ -582,12 +607,36 @@ describe('SentVoice', () => {
   test('when the active call ends first, activeCall clears although an older call is still live', async () => {
     const client = createClient();
     await client.register();
+    let invite!: SentVoice.CallInvite;
+    client.on('incomingCall', (received) => (invite = received));
     const older = await client.connect({ to: 'ben' });
-    const newer = await client.connect({ to: '+38349123456' });
+    adapter.receiveCall(`${prefix}=carol`);
+    const newer = await invite.accept();
 
     await newer.disconnect();
 
     expect(client).toMatchObject({ calls: [older], activeCall: null, isBusy: false });
+  });
+
+  test('connect and joinConference throw CALL_IN_PROGRESS while a call is live or an invite is pending', async () => {
+    const client = createClient();
+    await client.register();
+    const call = jest.spyOn(adapter, 'call');
+    const joinConference = jest.spyOn(adapter, 'joinConference');
+    const busy = { code: 'CALL_IN_PROGRESS', category: 'validation', retriable: false };
+    let invite!: SentVoice.CallInvite;
+    client.on('incomingCall', (received) => (invite = received));
+
+    adapter.receiveCall(`${prefix}=carol`);
+    await expect(client.connect({ to: 'ben' })).rejects.toMatchObject(busy);
+    await invite.reject();
+    const placed = await client.connect({ to: 'ben' });
+    await expect(client.joinConference({ name: 'daily-standup' })).rejects.toMatchObject(busy);
+    await placed.disconnect();
+    await client.joinConference({ name: 'daily-standup' });
+
+    expect(call).toHaveBeenCalledTimes(1);
+    expect(joinConference).toHaveBeenCalledTimes(1);
   });
 
   test('unregister leaves live calls running and stops surfacing incoming calls', async () => {

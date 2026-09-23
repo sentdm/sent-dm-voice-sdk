@@ -19,7 +19,8 @@ checklist at the end has been run against a live application.
 
 `loadAdapter` is `loadSinchAdapter`, which runs `await import('sinch-rtc')` when the client registers for the
 first time. Importing the SDK or creating a client never loads it, which keeps server-side rendering safe and
-the WebRTC bundle out of pages that never register.
+the WebRTC bundle out of pages that never register. A load that fails rejects with `NetworkError`, so
+`register()` retries it, and the core loads again on the next attempt.
 
 ## Registration
 
@@ -48,6 +49,10 @@ the WebRTC bundle out of pages that never register.
   fails `start()`, so `register()` rejects.
 - _Source:_ a call that arrives while another call is live is declined by `sinch-rtc` itself and never reaches
   the adapter.
+- _Source:_ `sinch-rtc` opens the microphone (`getUserMedia`) when the invite arrives, before `answer()`;
+  `answer()` asks again only when that failed, and rejects when it fails again.
+- _Source:_ `sinch-rtc` ignores an `answer()` within 1.5 s of the previous one on the same call, so after a
+  failed answer the adapter waits out that window before answering again.
 - _Source:_ `sinch-rtc` restarts itself when its remote configuration changes. The adapter attaches its
   incoming-call listener on every `onClientStarted` for that reason. A restart that fails is not visible to the
   core.
@@ -79,6 +84,11 @@ the WebRTC bundle out of pages that never register.
   the latest placed call from the moment it is placed (early media) or the latest answered incoming call, and
   is cleared when that call ends.
 - A call that has ended is forgotten, and controls on it do nothing: `sinch-rtc` throws on a second hangup.
+- _Source:_ one call at a time. Every call shares one signaling subscription, which `sinch-rtc` cancels when
+  any call ends, so a second live call loses its signaling; the core refuses `connect()` and `joinConference()`
+  with `CALL_IN_PROGRESS` while a call is live or an invite is pending.
+- _Source:_ a placed call whose `getUserMedia` failed carries an empty outgoing stream and no error. The adapter
+  hangs it up and rejects with `MediaPermissionError`.
 
 ## Events
 
@@ -130,28 +140,30 @@ worker, and the signaling channel only opens for a call.
 
 Provisional until observed.
 
-| `CallEndCause`        | When (_source_)                                          | State       | Error           |
-| --------------------- | -------------------------------------------------------- | ----------- | --------------- |
-| `HungUp`              | either side hung up a connected call                     | `completed` |                 |
-| `Canceled`            | the caller hung up before an answer                      | `completed` |                 |
-| `OtherDeviceAnswered` | another device of the same identity answered             | `completed` |                 |
-| `Denied`              | the callee declined                                      | `busy`      |                 |
-| `NoAnswer`            | `sinch-rtc`'s setup timeout: 45 s outbound, 60 s inbound | `noAnswer`  |                 |
-| `Timeout`             | not produced by 2.49.11                                  | `noAnswer`  |                 |
-| `Failure`             | a remote error, a failed call-setup request, ICE failure | `failed`    | mapped as below |
-| `Inactive`            | media disconnected for five minutes                      | `failed`    | `NetworkError`  |
+| `CallEndCause`        | When (_source_)                                                       | State       | Error           |
+| --------------------- | --------------------------------------------------------------------- | ----------- | --------------- |
+| `HungUp`              | either side hung up a connected call                                  | `completed` |                 |
+| `Canceled`            | the caller hung up before an answer                                   | `completed` |                 |
+| `OtherDeviceAnswered` | another device of the same identity answered                          | `completed` |                 |
+| `Denied`              | the callee declined, this endpoint included when it rejects an invite | `busy`      |                 |
+| `NoAnswer`            | `sinch-rtc`'s setup timeout: 45 s outbound, 60 s inbound              | `noAnswer`  |                 |
+| `Timeout`             | not produced by 2.49.11                                               | `noAnswer`  |                 |
+| `Failure`             | a remote error, a failed call-setup request, ICE failure              | `failed`    | mapped as below |
+| `Inactive`            | media disconnected for five minutes                                   | `failed`    | `NetworkError`  |
 
 Still unknown: how a phone that is busy or unanswered, and a call the backend refuses, arrive at the caller.
 
 ## Error mapping
 
-| Where                      | Provider error                                               | Sent error                              |
-| -------------------------- | ------------------------------------------------------------ | --------------------------------------- |
-| `answer()`                 | microphone tracks unavailable (_source:_ its only rejection) | `MediaPermissionError`                  |
-| call ended with `Failure`  | `SinchError` in the network domain, e.g. ICE failure (3002)  | `NetworkError`                          |
-| call ended with `Inactive` |                                                              | `NetworkError`                          |
-| `setOutputDevice()`        | no `setSinkId` in the browser                                | `CapabilityUnsupportedError`            |
-| anything else              | see below                                                    | `SentVoiceError` `UNKNOWN`, `signaling` |
+| Where                        | Provider error                                               | Sent error                              |
+| ---------------------------- | ------------------------------------------------------------ | --------------------------------------- |
+| `import('sinch-rtc')`        | the module could not be loaded                               | `NetworkError`                          |
+| `call()`, `joinConference()` | no audio track in the outgoing stream (microphone refused)   | `MediaPermissionError`                  |
+| `answer()`                   | microphone tracks unavailable (_source:_ its only rejection) | `MediaPermissionError`                  |
+| call ended with `Failure`    | `SinchError` in the network domain, e.g. ICE failure (3002)  | `NetworkError`                          |
+| call ended with `Inactive`   |                                                              | `NetworkError`                          |
+| `setOutputDevice()`          | no `setSinkId` in the browser                                | `CapabilityUnsupportedError`            |
+| anything else                | see below                                                    | `SentVoiceError` `UNKNOWN`, `signaling` |
 
 Unmapped errors keep the raw error in `providerDetail`. Known ones:
 

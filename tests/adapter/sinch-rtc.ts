@@ -35,6 +35,7 @@ let nextCallId = 1;
 export class FakeCall {
   readonly id = `sinch-call-${nextCallId++}`;
   readonly incomingStream = {} as MediaStream;
+  readonly outgoingStream: MediaStream;
   readonly details: { endCause: CallEndCause; error: SinchError | undefined } = {
     endCause: CallEndCause.None,
     error: undefined,
@@ -43,11 +44,16 @@ export class FakeCall {
   stats: RTCStatsReport | null = null;
   #listeners = new Set<CallListener>();
   #established = false;
+  #lastAnswer = Number.NEGATIVE_INFINITY;
 
   constructor(
     readonly direction: 'inbound' | 'outbound',
     readonly remoteUserId: string,
+    microphone = true,
   ) {
+    this.outgoingStream = {
+      getAudioTracks: () => (microphone ? [{} as MediaStreamTrack] : []),
+    } as unknown as MediaStream;
     calls.set(this.id, this);
   }
 
@@ -73,6 +79,9 @@ export class FakeCall {
   }
 
   async answer(): Promise<void> {
+    const now = Date.now();
+    if (now - this.#lastAnswer < 1_500) return;
+    this.#lastAnswer = now;
     if (this.answerFailure) throw this.answerFailure;
     this.#emit('onCallAnswered');
     this.establish();
@@ -117,6 +126,7 @@ export class FakeCall {
 export class FakeCallClient {
   readonly placed: Array<{ method: string; destination: string }> = [];
   constraints: MediaTrackConstraints | null = null;
+  microphoneDenied = false;
   #listeners: CallClientListener[] = [];
 
   addListener(listener: CallClientListener): void {
@@ -147,7 +157,7 @@ export class FakeCallClient {
 
   #place(method: string, destination: string): FakeCall {
     this.placed.push({ method, destination });
-    return new FakeCall('outbound', destination);
+    return new FakeCall('outbound', destination, !this.microphoneDenied);
   }
 }
 
