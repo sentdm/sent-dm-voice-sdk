@@ -55,6 +55,8 @@ describe('CallInvite', () => {
     const { callId, invite } = receiveCall(`${prefix}=ben`);
     const answer = jest.spyOn(adapter, 'answer').mockResolvedValueOnce(undefined);
     const reject = jest.spyOn(adapter, 'reject');
+    const accepted = jest.fn();
+    invite.on('accepted', accepted);
 
     const [call, sameCall] = await Promise.all([invite.accept(), invite.accept()]);
     await expect(invite.accept()).resolves.toBe(call);
@@ -64,6 +66,7 @@ describe('CallInvite', () => {
     expect(answer).toHaveBeenCalledTimes(1);
     expect(answer).toHaveBeenCalledWith(callId);
     expect(reject).not.toHaveBeenCalled();
+    expect(accepted.mock.calls).toEqual([[call]]);
     expect(invite.state).toBe('accepted');
     expect(call).toMatchObject({
       id: callId,
@@ -87,16 +90,19 @@ describe('CallInvite', () => {
     expect(invite.state).toBe('accepted');
   });
 
-  test('reject declines a pending call without a cancelled event', async () => {
+  test('reject declines a pending call with a rejected event and no cancelled event', async () => {
     const { callId, invite } = receiveCall(`${prefix}=ben`);
     const reject = jest.spyOn(adapter, 'reject');
+    const rejected = jest.fn();
     const cancelled = jest.fn();
+    invite.on('rejected', rejected);
     invite.on('cancelled', cancelled);
 
     await invite.reject();
 
     expect(reject).toHaveBeenCalledWith(callId);
     expect(invite.state).toBe('rejected');
+    expect(rejected).toHaveBeenCalledTimes(1);
     expect(cancelled).not.toHaveBeenCalled();
   });
 
@@ -104,10 +110,13 @@ describe('CallInvite', () => {
     const { invite } = receiveCall(`${prefix}=ben`);
     const failure = new NetworkError();
     adapter.failNext('reject', failure);
+    const rejected = jest.fn();
+    invite.on('rejected', rejected);
 
     await expect(invite.reject()).rejects.toBe(failure);
 
     expect(invite.state).toBe('rejected');
+    expect(rejected).toHaveBeenCalledTimes(1);
   });
 
   test.each<[string, CallScript, SentVoice.CancelInfo]>([

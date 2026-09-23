@@ -84,6 +84,7 @@ export interface SentVoiceEvents {
   registered: () => void;
   unregistered: () => void;
   incomingCall: (invite: CallInvite) => void;
+  activeCallChanged: (call: Call | null) => void;
   offline: (reason: SentVoiceError) => void;
   tokenWillExpire: (info: { expiresAt: number }) => void;
   error: (error: SentVoiceError) => void;
@@ -412,7 +413,10 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
     this.#updates.delete(event.callId);
     this.#invites.delete(event.callId);
     this.#calls = this.#calls.filter((call) => call.id !== event.callId);
-    if (this.#activeCall?.id === event.callId) this.#activeCall = null;
+    if (this.#activeCall?.id === event.callId) {
+      this.#activeCall = null;
+      this.emit('activeCallChanged', null);
+    }
     update(event.reason, event.error);
   }
 
@@ -445,6 +449,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
   #track(call: Call): void {
     this.#calls = [...this.#calls, call];
     this.#activeCall = call;
+    this.emit('activeCallChanged', call);
   }
 
   #online(token: VoiceToken, run: number): void {

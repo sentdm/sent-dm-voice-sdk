@@ -7,6 +7,8 @@ export interface CancelInfo {
 }
 
 export interface CallInviteEvents {
+  accepted: (call: Call) => void;
+  rejected: () => void;
   cancelled: (info: CancelInfo) => void;
 }
 
@@ -55,6 +57,7 @@ export class CallInvite extends TypedEmitter<CallInviteEvents> {
   async reject(): Promise<void> {
     if (this.#state !== 'pending') return;
     this.#state = 'rejected';
+    this.emit('rejected');
     await this.#provider.reject();
   }
 
@@ -67,6 +70,7 @@ export class CallInvite extends TypedEmitter<CallInviteEvents> {
     if (this.#state !== 'pending') throw endedError();
     this.#state = 'accepted';
     this.#provider.accepted();
+    this.emit('accepted', this.#call);
     return this.#call;
   }
 }

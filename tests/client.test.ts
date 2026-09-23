@@ -555,11 +555,13 @@ describe('SentVoice', () => {
     expect(joinConference).not.toHaveBeenCalled();
   });
 
-  test('calls holds placed and accepted calls, and activeCall follows the latest until it ends', async () => {
+  test('calls holds placed and accepted calls, and activeCall follows the latest until it ends, announcing each change', async () => {
     const client = createClient();
     await client.register();
     const invites: SentVoice.CallInvite[] = [];
     client.on('incomingCall', (invite) => invites.push(invite));
+    const activeCalls: Array<SentVoice.Call | null> = [];
+    client.on('activeCallChanged', (call) => activeCalls.push(call));
     expect(client).toMatchObject({ calls: [], activeCall: null, isBusy: false });
 
     const placed = await client.connect({ to: 'ben' });
@@ -574,6 +576,7 @@ describe('SentVoice', () => {
 
     await accepted.disconnect();
     expect(client).toMatchObject({ calls: [], activeCall: null, isBusy: false });
+    expect(activeCalls).toEqual([placed, accepted, null]);
   });
 
   test('when the active call ends first, activeCall clears although an older call is still live', async () => {
