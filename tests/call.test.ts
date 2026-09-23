@@ -27,7 +27,11 @@ describe('Call', () => {
     jest.useFakeTimers({ now });
     adapter = new MockAdapter();
     jest.mocked(loadAdapter).mockResolvedValue(adapter);
-    client = new SentVoice({ tokenProvider: async () => voiceToken(), logLevel: 'off' });
+    client = new SentVoice({
+      tokenProvider: async () => voiceToken(),
+      logLevel: 'off',
+      telemetry: { disabled: true },
+    });
     await client.register();
   });
 

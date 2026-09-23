@@ -26,7 +26,7 @@ describe('SentVoice', () => {
   let tokenProvider: jest.Mock<Promise<string>, []>;
 
   const createClient = (options: Partial<SentVoiceOptions> = {}) =>
-    new SentVoice({ tokenProvider, logLevel: 'off', ...options });
+    new SentVoice({ tokenProvider, logLevel: 'off', telemetry: { disabled: true }, ...options });
 
   beforeEach(() => {
     jest.useFakeTimers({ now: Date.parse('2026-09-22T12:00:00Z') });
@@ -428,7 +428,13 @@ describe('SentVoice', () => {
 
   test('an invalid logLevel warns and falls back to warn', async () => {
     const logger = { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() };
-    const client = new SentVoice({ tokenProvider, logger, logLevel: 'verbose' as never, registerRetries: 1 });
+    const client = new SentVoice({
+      tokenProvider,
+      logger,
+      logLevel: 'verbose' as never,
+      registerRetries: 1,
+      telemetry: { disabled: true },
+    });
 
     expect(logger.warn).toHaveBeenCalledWith(
       'SentVoiceOptions.logLevel was set to "verbose", expected one of ["off","error","warn","info","debug"]',

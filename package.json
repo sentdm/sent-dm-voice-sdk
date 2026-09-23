@@ -23,6 +23,7 @@
     "fix": "./scripts/format"
   },
   "dependencies": {
+    "bowser": "2.14.1",
     "sinch-rtc": "2.49.11"
   },
   "devDependencies": {

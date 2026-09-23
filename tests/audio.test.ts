@@ -32,7 +32,13 @@ describe('AudioController', () => {
   let logger: Record<'error' | 'warn' | 'info' | 'debug', jest.Mock>;
 
   const createClient = (options: Partial<SentVoiceOptions> = {}) =>
-    new SentVoice({ tokenProvider: async () => voiceToken(), logger, logLevel: 'warn', ...options });
+    new SentVoice({
+      tokenProvider: async () => voiceToken(),
+      logger,
+      logLevel: 'warn',
+      telemetry: { disabled: true },
+      ...options,
+    });
   const placeCall = (client: SentVoice) => client.connect({ to: 'ben' });
   const receiveCall = () => adapter.receiveCall(`${prefix}=carol`);
 

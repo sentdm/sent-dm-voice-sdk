@@ -9,7 +9,11 @@ jest.mock('sinch-rtc', () => {
 });
 
 test('sinch-rtc loads on the first register, not when the SDK is imported or a client is created', async () => {
-  const client = new SentVoice({ tokenProvider: async () => voiceToken(), logLevel: 'off' });
+  const client = new SentVoice({
+    tokenProvider: async () => voiceToken(),
+    logLevel: 'off',
+    telemetry: { disabled: true },
+  });
   expect(mockLoaded).not.toHaveBeenCalled();
 
   await client.register();

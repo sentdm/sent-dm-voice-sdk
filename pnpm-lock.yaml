@@ -10,6 +10,9 @@ overrides:
 importers:
   .:
     dependencies:
+      bowser:
+        specifier: 2.14.1
+        version: 2.14.1
       sinch-rtc:
         specifier: 2.49.11
         version: 2.49.11
@@ -1303,6 +1306,12 @@ packages:
         integrity: sha512-bopVNp6ugyA150DDuZfPFdt1KZ5a94ZDiwX4hMgZDzF+GttD80lEy8kj98kbyhLXnPvhtIo93mdnLIjpCAeeOw==,
       }
     engines: { node: '>=10.0.0' }
+
+  bowser@2.14.1:
+    resolution:
+      {
+        integrity: sha512-tzPjzCxygAKWFOJP011oxFHs57HzIhOEracIgAePE4pqB3LikALKnSzUyU4MGs9/iCEUuHlAJTjTc5M+u7YEGg==,
+      }
 
   brace-expansion@2.1.7:
     resolution:
@@ -4787,6 +4796,8 @@ snapshots:
   baseline-browser-mapping@2.11.25: {}
 
   basic-ftp@5.3.1: {}
+
+  bowser@2.14.1: {}
 
   brace-expansion@2.1.7:
     dependencies:

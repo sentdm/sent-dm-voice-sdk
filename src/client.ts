@@ -14,6 +14,7 @@ import { NotRegisteredError, SentVoiceError, TokenExpiredError } from './errors'
 import { TypedEmitter } from './events';
 import { CallInvite, type CancelInfo } from './invite';
 import { createLog, parseLogLevel, type Log, type Logger, type LogLevel } from './log';
+import { Telemetry } from './telemetry';
 import { fetchToken, offlineRetryDelay, refreshDelay, retryDelay, type VoiceToken } from './token';
 import { VERSION } from './version';
 
@@ -69,6 +70,13 @@ export interface SentVoiceOptions {
         element?: HTMLAudioElement | undefined;
       }
     | undefined;
+
+  /**
+   * Usage and call quality data the SDK reports to Sent, authenticated with the voice token: the
+   * browser and device, registration and call timings, call quality and error codes. `baseURL`
+   * defaults to `https://api.sent.dm`; set `disabled` to report nothing.
+   */
+  telemetry?: { baseURL?: string | undefined; disabled?: boolean | undefined } | undefined;
 }
 
 export interface SentVoiceEvents {
@@ -115,6 +123,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
   #calls: Call[] = [];
   #activeCall: Call | null = null;
   #audioLifecycle: AudioLifecycle | undefined;
+  #telemetry: Telemetry | undefined;
 
   constructor({
     tokenProvider,
@@ -123,6 +132,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
     logger = console,
     serviceWorker,
     audio,
+    telemetry,
   }: SentVoiceOptions) {
     super();
     this.#tokenProvider = tokenProvider;
@@ -138,6 +148,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
       },
       onLifecycle: (lifecycle) => (this.#audioLifecycle = lifecycle),
     });
+    if (!telemetry?.disabled) this.#telemetry = new Telemetry(telemetry?.baseURL, this.#log);
   }
 
   get state(): SentVoice.ClientState {
@@ -183,10 +194,12 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
     if (this.#state === 'destroyed') throw destroyedError();
     if (this.#state === 'unregistered') return;
 
+    const started = Date.now();
     this.#stop('unregistered');
     const unregistered = this.#unregisterAdapter();
     this.emit('unregistered');
     await unregistered;
+    this.#telemetry?.unregistered(Date.now() - started);
   }
 
   /** Calls a phone number in E.164 format or another user of your app. */
@@ -228,6 +241,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
 
     this.#stop('destroyed');
     this.#audioLifecycle?.destroyed();
+    this.#telemetry?.destroyed();
     const endings = [
       ...[...this.#invites.values()].map((invite) => invite.reject()),
       ...this.#calls.map((call) => call.disconnect()),
@@ -243,11 +257,14 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
   }
 
   async #register(run: number, offline: boolean): Promise<void> {
+    const started = Date.now();
+    let attempts = 0;
     let token: VoiceToken;
     try {
-      token = await this.#connect(run);
+      token = await this.#connect(run, () => attempts++);
       this.#check(run);
     } catch (error) {
+      this.#telemetry?.registerFailed(Date.now() - started, attempts, error);
       if (run === this.#run) {
         this.#registering = undefined;
         if (offline) {
@@ -260,6 +277,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
       throw error;
     }
     this.#registering = undefined;
+    this.#telemetry?.registered(Date.now() - started, attempts);
     this.#online(token, run);
   }
 
@@ -286,8 +304,9 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
     }
   }
 
-  async #connect(run: number): Promise<VoiceToken> {
+  async #connect(run: number, onAttempt?: () => void): Promise<VoiceToken> {
     for (let retry = 0; ; retry++) {
+      onAttempt?.();
       try {
         return await this.#attempt(run);
       } catch (error) {
@@ -332,7 +351,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
     dial: (adapter: ProviderAdapter, prefix: string) => Promise<string>,
   ): Promise<Call> {
     const { adapter, token } = this.#session();
-    const callId = await dial(adapter, token.prefix);
+    const callId = await this.#reported(dial(adapter, token.prefix));
     if (this.#state === 'destroyed') {
       await adapter
         .hangup(callId)
@@ -374,7 +393,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
       identity: token.identity,
     });
     const invite = new CallInvite(call, {
-      answer: () => adapter.answer(callId),
+      answer: () => this.#reported(adapter.answer(callId), callId),
       reject: () => adapter.reject(callId),
       accepted: () => this.#track(call),
     });
@@ -405,12 +424,21 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
     to: Address,
   ): Call {
     this.#audioLifecycle?.callStarted();
-    return new Call(callId, direction, from, to, {
+    const call = new Call(callId, direction, from, to, {
       hangup: () => adapter.hangup(callId),
       mute: (muted) => adapter.mute(callId, muted),
       sendDigits: (digits) => adapter.sendDigits(callId, digits),
       getStats: () => adapter.getStats(callId),
       onUpdate: (update) => this.#updates.set(callId, update),
+    });
+    this.#telemetry?.callStarted(call);
+    return call;
+  }
+
+  #reported<T>(operation: Promise<T>, callId?: string): Promise<T> {
+    return operation.catch((error: unknown) => {
+      this.#telemetry?.error(error, callId);
+      throw error;
     });
   }
 
@@ -421,6 +449,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
 
   #online(token: VoiceToken, run: number): void {
     this.#token = token;
+    this.#telemetry?.useToken(token.jwt);
     const delay = refreshDelay(token);
     this.#log.debug(`Refreshing the voice token in ${delay} ms`);
     this.#timer = setTimeout(() => void this.#refresh(run, token.expiresAt), delay);
@@ -434,6 +463,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
     this.#log.warn(`Token refresh failed, going offline: ${error}`);
     this.#state = 'offline';
     this.#scheduleOfflineRetry(run);
+    this.#telemetry?.error(error);
     this.emit('error', error);
     if (run === this.#run) this.emit('offline', new TokenExpiredError());
   }

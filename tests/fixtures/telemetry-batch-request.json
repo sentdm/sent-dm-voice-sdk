@@ -1,0 +1,56 @@
+{
+  "sdk_version": "0.1.0",
+  "events": [
+    {
+      "type": "register.failed",
+      "occurred_at": "2026-07-22T11:59:59.250Z",
+      "payload": { "duration_ms": 250, "attempt": 1, "code": "UNKNOWN", "category": "signaling" }
+    },
+    {
+      "type": "register.completed",
+      "occurred_at": "2026-07-22T12:00:00.000Z",
+      "payload": { "duration_ms": 412, "attempt": 1 }
+    },
+    {
+      "type": "client.info",
+      "occurred_at": "2026-07-22T12:00:00.000Z",
+      "payload": {
+        "browser": "Chrome",
+        "browser_version": "128",
+        "os": "macOS",
+        "os_version": "10.15.7",
+        "device_type": "desktop"
+      }
+    },
+    {
+      "type": "call.started",
+      "call_id": "mock-call-1",
+      "occurred_at": "2026-07-22T12:00:01.000Z",
+      "payload": { "direction": "inbound" }
+    },
+    {
+      "type": "client.error",
+      "call_id": "mock-call-1",
+      "occurred_at": "2026-07-22T12:00:02.000Z",
+      "payload": { "code": "MEDIA_PERMISSION_DENIED", "category": "media" }
+    },
+    {
+      "type": "call.connected",
+      "call_id": "mock-call-1",
+      "occurred_at": "2026-07-22T12:00:03.000Z",
+      "payload": { "direction": "inbound", "duration_ms": 2000 }
+    },
+    {
+      "type": "call.quality",
+      "call_id": "mock-call-1",
+      "occurred_at": "2026-07-22T12:00:29.000Z",
+      "payload": { "rtt_ms": 84, "jitter_ms": 6.5, "packet_loss": 0.012, "samples": 2 }
+    },
+    {
+      "type": "call.ended",
+      "call_id": "mock-call-1",
+      "occurred_at": "2026-07-22T12:00:29.000Z",
+      "payload": { "direction": "inbound", "outcome": "completed", "duration_ms": 26000 }
+    }
+  ]
+}
