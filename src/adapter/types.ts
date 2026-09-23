@@ -1,3 +1,4 @@
+import type { CallStats } from '../call';
 import type { SentVoiceError } from '../errors';
 
 /**
@@ -53,9 +54,3 @@ export type CallEvent =
       reason: 'completed' | 'failed' | 'busy' | 'noAnswer';
       error?: SentVoiceError;
     };
-
-export interface CallStats {
-  jitter: number;
-  packetLoss: number;
-  rtt: number;
-}

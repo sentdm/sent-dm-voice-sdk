@@ -7,6 +7,7 @@ export type SentVoiceErrorCode =
   | 'CALL_FAILED'
   | 'NETWORK'
   | 'CAPABILITY_UNSUPPORTED'
+  | 'INVALID_ADDRESS'
   | 'UNKNOWN';
 
 export type SentVoiceErrorCategory = 'auth' | 'media' | 'signaling' | 'network' | 'validation' | 'capability';

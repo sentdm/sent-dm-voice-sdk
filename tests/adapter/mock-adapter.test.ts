@@ -1,4 +1,4 @@
-import type { CallEvent, CallTarget, IncomingCall } from '@sentdm/voice/adapter/types';
+import type { CallEvent, CallTarget } from '@sentdm/voice/adapter/types';
 import { CallFailedError, NetworkError } from '@sentdm/voice/errors';
 import { MockAdapter, type CallScript, type FailableMethod } from './mock-adapter';
 import { describeSharedAdapterTests } from './shared-adapter-tests';
@@ -8,7 +8,11 @@ const caller = `${prefix}=agent-42`;
 const room = `${prefix}=daily-standup`;
 const phone: CallTarget = { kind: 'number', number: '+38349111222' };
 
-describeSharedAdapterTests('MockAdapter', async () => new MockAdapter());
+describeSharedAdapterTests(
+  'MockAdapter',
+  async () => new MockAdapter(),
+  (adapter, from) => adapter.receiveCall(from),
+);
 
 describe('MockAdapter', () => {
   let adapter: MockAdapter;
@@ -53,28 +57,6 @@ describe('MockAdapter', () => {
 
     expect(() => invoke(callId)).toThrow(error);
     expect(() => invoke(callId)).not.toThrow();
-  });
-
-  test('receiveCall delivers the call to onIncoming, and answer connects it', async () => {
-    const incoming: IncomingCall[] = [];
-    adapter.onIncoming((call) => incoming.push(call));
-
-    const callId = adapter.receiveCall(caller);
-    await adapter.answer(callId);
-
-    expect(incoming).toEqual([{ callId, from: caller }]);
-    expect(events).toEqual([
-      { callId, type: 'answered' },
-      { callId, type: 'connected' },
-    ]);
-  });
-
-  test('reject ends an incoming call', async () => {
-    const callId = adapter.receiveCall(caller);
-
-    await adapter.reject(callId);
-
-    expect(events).toEqual([{ callId, type: 'ended', reason: 'completed' }]);
   });
 
   test('receiveCall plays the caller script, such as hanging up before the call is answered', () => {

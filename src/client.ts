@@ -1,7 +1,16 @@
 import { loadAdapter } from './adapter/loader';
-import type { ProviderAdapter } from './adapter/types';
+import type { CallEvent, IncomingCall, ProviderAdapter } from './adapter/types';
+import {
+  Call,
+  type Address,
+  type CallState,
+  type CallStats,
+  type DisconnectInfo,
+  type QualityWarning,
+} from './call';
 import { NotRegisteredError, SentVoiceError, TokenExpiredError } from './errors';
 import { TypedEmitter } from './events';
+import { CallInvite, type CancelInfo } from './invite';
 import { createLog, parseLogLevel, type Log, type Logger, type LogLevel } from './log';
 import { fetchToken, offlineRetryDelay, refreshDelay, retryDelay, type VoiceToken } from './token';
 import { VERSION } from './version';
@@ -40,12 +49,23 @@ export interface SentVoiceEvents {
   registering: () => void;
   registered: () => void;
   unregistered: () => void;
+  incomingCall: (invite: CallInvite) => void;
   offline: (reason: SentVoiceError) => void;
   tokenWillExpire: (info: { expiresAt: number }) => void;
   error: (error: SentVoiceError) => void;
 }
 
 const destroyedError = () => new NotRegisteredError({ message: 'The client was destroyed.' });
+
+const invalidAddress = (message: string) =>
+  new SentVoiceError({ code: 'INVALID_ADDRESS', category: 'validation', retriable: false, message });
+
+const numberPattern = /^\+[1-9]\d{1,14}$/;
+const namePattern = /^[A-Za-z0-9_-]+$/;
+const identityMaxLength = 200;
+const roomMaxLength = 27;
+
+const isName = (value: string, maxLength: number) => value.length <= maxLength && namePattern.test(value);
 
 export class SentVoice extends TypedEmitter<SentVoiceEvents> {
   static readonly version: string = VERSION;
@@ -62,6 +82,10 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
   #run = 0;
   #timer: ReturnType<typeof setTimeout> | undefined;
   #wake: (() => void) | undefined;
+  #updates = new Map<string, (state: Exclude<CallState, 'initiated'>, error?: SentVoiceError) => void>();
+  #invites = new Map<string, CallInvite>();
+  #calls: Call[] = [];
+  #activeCall: Call | null = null;
 
   constructor({ tokenProvider, registerRetries = 2, logLevel, logger = console }: SentVoiceOptions) {
     super();
@@ -83,6 +107,18 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
 
   get number(): string | undefined {
     return this.#token?.number;
+  }
+
+  get calls(): Call[] {
+    return [...this.#calls];
+  }
+
+  get activeCall(): Call | null {
+    return this.#activeCall;
+  }
+
+  get isBusy(): boolean {
+    return this.#activeCall !== null;
   }
 
   /** Fetches a token from `tokenProvider`, registers with it and keeps it refreshed. */
@@ -110,11 +146,53 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
     await unregistered;
   }
 
-  /** Tears the client down for good; later calls throw `NotRegisteredError`. */
+  /** Calls a phone number in E.164 format or another user of your app. */
+  async connect({ to }: SentVoice.ConnectParams): Promise<Call> {
+    if (to.startsWith('+')) {
+      if (!numberPattern.test(to)) {
+        throw invalidAddress(`'to' must be a phone number in E.164 format (e.g. +14155551234).`);
+      }
+      return this.#place({ kind: 'number', number: to }, (adapter) =>
+        adapter.call({ kind: 'number', number: to }),
+      );
+    }
+
+    if (!isName(to, identityMaxLength)) {
+      throw invalidAddress(
+        `'to' may only contain letters, digits, '-' and '_', up to ${identityMaxLength} characters.`,
+      );
+    }
+    return this.#place({ kind: 'user', identity: to }, (adapter, prefix) =>
+      adapter.call({ kind: 'user', id: `${prefix}=${to}` }),
+    );
+  }
+
+  /** Joins one of your account's conference rooms. */
+  async joinConference({ name }: SentVoice.JoinConferenceParams): Promise<Call> {
+    if (!isName(name, roomMaxLength)) {
+      throw invalidAddress(
+        `'name' may only contain letters, digits, '-' and '_', up to ${roomMaxLength} characters.`,
+      );
+    }
+    return this.#place({ kind: 'conference', name }, (adapter, prefix) =>
+      adapter.joinConference(`${prefix}=${name}`),
+    );
+  }
+
+  /** Ends every call and tears the client down for good; later calls throw `NotRegisteredError`. */
   async destroy(): Promise<void> {
     if (this.#state === 'destroyed') return;
 
     this.#stop('destroyed');
+    const endings = [
+      ...[...this.#invites.values()].map((invite) => invite.reject()),
+      ...this.#calls.map((call) => call.disconnect()),
+    ];
+    await Promise.all(
+      endings.map((ending) =>
+        ending.catch((error: unknown) => this.#log.warn(`Ending a call on destroy failed: ${error}`)),
+      ),
+    );
     await this.#unregisterAdapter().catch((error: unknown) =>
       this.#log.warn(`Unregistering on destroy failed: ${error}`),
     );
@@ -189,12 +267,110 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
     this.#check(run);
     const token = await fetchToken(this.#tokenProvider);
     await this.#callAdapter(async () => {
-      const adapter = await (this.#adapter ??= loadAdapter());
+      const adapter = await (this.#adapter ??= this.#loadAdapter());
       this.#check(run);
       await adapter.register(token.jwt);
       this.#registeredAdapter = adapter;
     });
     return token;
+  }
+
+  async #loadAdapter(): Promise<ProviderAdapter> {
+    const adapter = await loadAdapter();
+    adapter.onIncoming((incoming) => this.#onIncoming(adapter, incoming));
+    adapter.onCallEvent((event) => this.#onCallEvent(event));
+    return adapter;
+  }
+
+  async #place(
+    to: Address,
+    dial: (adapter: ProviderAdapter, prefix: string) => Promise<string>,
+  ): Promise<Call> {
+    const { adapter, token } = this.#session();
+    const callId = await dial(adapter, token.prefix);
+    if (this.#state === 'destroyed') {
+      await adapter
+        .hangup(callId)
+        .catch((error: unknown) => this.#log.warn(`Ending a call on destroy failed: ${error}`));
+      throw destroyedError();
+    }
+
+    const call = this.#createCall(
+      adapter,
+      callId,
+      'outbound',
+      { kind: 'user', identity: token.identity },
+      to,
+    );
+    this.#track(call);
+    return call;
+  }
+
+  #session(): { adapter: ProviderAdapter; token: VoiceToken } {
+    const adapter = this.#registeredAdapter;
+    const token = this.#token;
+    if (this.#state !== 'registered' || !adapter || !token) {
+      throw this.#state === 'destroyed' ? destroyedError() : new NotRegisteredError();
+    }
+    return { adapter, token };
+  }
+
+  #onIncoming(adapter: ProviderAdapter, { callId, from }: IncomingCall): void {
+    const token = this.#token;
+    if (!token) return;
+
+    const separator = from.indexOf('=');
+    const caller: Address =
+      separator < 0 ?
+        { kind: 'number', number: from }
+      : { kind: 'user', identity: from.slice(separator + 1) };
+    const call = this.#createCall(adapter, callId, 'inbound', caller, {
+      kind: 'user',
+      identity: token.identity,
+    });
+    const invite = new CallInvite(call, {
+      answer: () => adapter.answer(callId),
+      reject: () => adapter.reject(callId),
+      accepted: () => this.#track(call),
+    });
+    this.#invites.set(callId, invite);
+    this.emit('incomingCall', invite);
+  }
+
+  #onCallEvent(event: CallEvent): void {
+    const update = this.#updates.get(event.callId);
+    if (!update) return;
+    if (event.type !== 'ended') {
+      update(event.type === 'reconnected' ? 'connected' : event.type);
+      return;
+    }
+
+    this.#updates.delete(event.callId);
+    this.#invites.delete(event.callId);
+    this.#calls = this.#calls.filter((call) => call.id !== event.callId);
+    if (this.#activeCall?.id === event.callId) this.#activeCall = null;
+    update(event.reason, event.error);
+  }
+
+  #createCall(
+    adapter: ProviderAdapter,
+    callId: string,
+    direction: 'inbound' | 'outbound',
+    from: Address,
+    to: Address,
+  ): Call {
+    return new Call(callId, direction, from, to, {
+      hangup: () => adapter.hangup(callId),
+      mute: (muted) => adapter.mute(callId, muted),
+      sendDigits: (digits) => adapter.sendDigits(callId, digits),
+      getStats: () => adapter.getStats(callId),
+      onUpdate: (update) => this.#updates.set(callId, update),
+    });
+  }
+
+  #track(call: Call): void {
+    this.#calls = [...this.#calls, call];
+    this.#activeCall = call;
   }
 
   #online(token: VoiceToken, run: number): void {
@@ -264,4 +440,25 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
 
 export declare namespace SentVoice {
   export type ClientState = 'unregistered' | 'registering' | 'registered' | 'offline' | 'destroyed';
+
+  export interface ConnectParams {
+    /** A phone number in E.164 format like `+14155551234`, or the identity of another user of your app. */
+    to: string;
+  }
+
+  export interface JoinConferenceParams {
+    /** The room name, private to your account: letters, digits, `-` and `_`, up to 27 characters. */
+    name: string;
+  }
+
+  export {
+    type Call as Call,
+    type CallState as CallState,
+    type Address as Address,
+    type CallStats as CallStats,
+    type DisconnectInfo as DisconnectInfo,
+    type QualityWarning as QualityWarning,
+  };
+
+  export { type CallInvite as CallInvite, type CancelInfo as CancelInfo };
 }

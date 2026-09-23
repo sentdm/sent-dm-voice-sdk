@@ -1,6 +1,6 @@
 import SentVoice, { type SentVoiceOptions } from '@sentdm/voice';
 import { loadAdapter } from '@sentdm/voice/adapter/loader';
-import type { CallEvent } from '@sentdm/voice/adapter/types';
+import type { CallEvent, CallTarget } from '@sentdm/voice/adapter/types';
 import {
   NetworkError,
   NotRegisteredError,
@@ -18,6 +18,8 @@ type PendingFetch = { resolve: (jwt: string) => void; reject: (error: Error) => 
 
 const fetchFailure = new TypeError('Failed to fetch');
 const refreshAt = 480_000;
+const longestIdentity = 'agent_7-B'.padEnd(200, 'x');
+const invalidAddress = { code: 'INVALID_ADDRESS', category: 'validation', retriable: false };
 
 describe('SentVoice', () => {
   let adapter: MockAdapter;
@@ -429,5 +431,217 @@ describe('SentVoice', () => {
     expect(logger.warn).toHaveBeenLastCalledWith(expect.stringContaining('going offline'));
     expect(logger.info).not.toHaveBeenCalled();
     expect(logger.debug).not.toHaveBeenCalled();
+  });
+
+  test.each<[string, string, CallTarget, SentVoice.Address]>([
+    [
+      'an E.164 number',
+      '+38349123456',
+      { kind: 'number', number: '+38349123456' },
+      { kind: 'number', number: '+38349123456' },
+    ],
+    ['an identity', 'ben', { kind: 'user', id: `${prefix}=ben` }, { kind: 'user', identity: 'ben' }],
+    [
+      'a 200-character identity',
+      longestIdentity,
+      { kind: 'user', id: `${prefix}=${longestIdentity}` },
+      { kind: 'user', identity: longestIdentity },
+    ],
+  ])('connect to %s dials it and returns the call addressed to it', async (_, to, target, address) => {
+    const client = createClient();
+    await client.register();
+    const call = jest.spyOn(adapter, 'call');
+
+    await expect(client.connect({ to })).resolves.toMatchObject({
+      from: { kind: 'user', identity: 'agent-42' },
+      to: address,
+    });
+
+    expect(call).toHaveBeenCalledWith(target);
+  });
+
+  test.each<[string, string]>([
+    ['a namespaced identity', 'k3x9=ben'],
+    ['an empty string', ''],
+    ['whitespace', ' '],
+    ['an identity over 200 characters', 'x'.repeat(201)],
+    ['a number with spaces', '+383 49 123 456'],
+    ['a number with a leading zero', '+038349123456'],
+    ['a number over 15 digits', '+1234567890123456'],
+  ])('connect to %s throws INVALID_ADDRESS without dialing', async (_, to) => {
+    const client = createClient();
+    await client.register();
+    const call = jest.spyOn(adapter, 'call');
+
+    const connecting = client.connect({ to });
+
+    await expect(connecting).rejects.toBeInstanceOf(SentVoiceError);
+    await expect(connecting).rejects.toMatchObject(invalidAddress);
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  test.each<[string, string]>([
+    ['a room', 'daily-standup'],
+    ['a 27-character room', 'x'.repeat(27)],
+  ])('joinConference to %s dials it under the account prefix', async (_, name) => {
+    const client = createClient();
+    await client.register();
+    const joinConference = jest.spyOn(adapter, 'joinConference');
+
+    await expect(client.joinConference({ name })).resolves.toMatchObject({
+      to: { kind: 'conference', name },
+    });
+
+    expect(joinConference).toHaveBeenCalledWith(`${prefix}=${name}`);
+  });
+
+  test.each<[string, string]>([
+    ['a namespaced room', 'k3x9=daily'],
+    ['an empty string', ''],
+    ['a room with a space', 'daily standup'],
+    ['a room over 27 characters', 'x'.repeat(28)],
+  ])('joinConference to %s throws INVALID_ADDRESS without dialing', async (_, name) => {
+    const client = createClient();
+    await client.register();
+    const joinConference = jest.spyOn(adapter, 'joinConference');
+
+    const joining = client.joinConference({ name });
+
+    await expect(joining).rejects.toBeInstanceOf(SentVoiceError);
+    await expect(joining).rejects.toMatchObject(invalidAddress);
+    expect(joinConference).not.toHaveBeenCalled();
+  });
+
+  test.each<[string, (client: SentVoice) => Promise<unknown>]>([
+    ['connect', (client) => client.connect({ to: 'ben' })],
+    ['joinConference', (client) => client.joinConference({ name: 'daily-standup' })],
+  ])('%s throws NotRegisteredError unless the client is registered', async (_, place) => {
+    const client = createClient({ registerRetries: 0 });
+    const call = jest.spyOn(adapter, 'call');
+    const joinConference = jest.spyOn(adapter, 'joinConference');
+    const notRegistered = { code: 'NOT_REGISTERED', message: 'The client is not registered.' };
+
+    await expect(place(client)).rejects.toMatchObject(notRegistered);
+    const registering = client.register();
+    await expect(place(client)).rejects.toMatchObject(notRegistered);
+    await registering;
+    tokenProvider.mockRejectedValue(fetchFailure);
+    await jest.advanceTimersByTimeAsync(refreshAt);
+    expect(client.state).toBe('offline');
+    await expect(place(client)).rejects.toMatchObject(notRegistered);
+    await client.destroy();
+    await expect(place(client)).rejects.toMatchObject({
+      code: 'NOT_REGISTERED',
+      message: 'The client was destroyed.',
+    });
+
+    expect(call).not.toHaveBeenCalled();
+    expect(joinConference).not.toHaveBeenCalled();
+  });
+
+  test('calls holds placed and accepted calls, and activeCall follows the latest until it ends', async () => {
+    const client = createClient();
+    await client.register();
+    const invites: SentVoice.CallInvite[] = [];
+    client.on('incomingCall', (invite) => invites.push(invite));
+    expect(client).toMatchObject({ calls: [], activeCall: null, isBusy: false });
+
+    const placed = await client.connect({ to: 'ben' });
+    adapter.receiveCall(`${prefix}=carol`);
+    expect(client).toMatchObject({ calls: [placed], activeCall: placed, isBusy: true });
+
+    const accepted = await invites[0]!.accept();
+    expect(client).toMatchObject({ calls: [placed, accepted], activeCall: accepted, isBusy: true });
+
+    await placed.disconnect();
+    expect(client).toMatchObject({ calls: [accepted], activeCall: accepted, isBusy: true });
+
+    await accepted.disconnect();
+    expect(client).toMatchObject({ calls: [], activeCall: null, isBusy: false });
+  });
+
+  test('when the active call ends first, activeCall clears although an older call is still live', async () => {
+    const client = createClient();
+    await client.register();
+    const older = await client.connect({ to: 'ben' });
+    const newer = await client.connect({ to: '+38349123456' });
+
+    await newer.disconnect();
+
+    expect(client).toMatchObject({ calls: [older], activeCall: null, isBusy: false });
+  });
+
+  test('unregister leaves live calls running and stops surfacing incoming calls', async () => {
+    const client = createClient();
+    await client.register();
+    const call = await client.connect({ to: 'ben' });
+    const incomingCall = jest.fn();
+    client.on('incomingCall', incomingCall);
+    const hangup = jest.spyOn(adapter, 'hangup');
+
+    await client.unregister();
+    adapter.receiveCall(`${prefix}=carol`);
+
+    expect(hangup).not.toHaveBeenCalled();
+    expect(incomingCall).not.toHaveBeenCalled();
+    expect(client).toMatchObject({ calls: [call], activeCall: call, isBusy: true });
+  });
+
+  test('destroy hangs up live calls and rejects pending invites, then unregisters', async () => {
+    const client = createClient();
+    await client.register();
+    const invites: SentVoice.CallInvite[] = [];
+    client.on('incomingCall', (invite) => invites.push(invite));
+    const placed = await client.connect({ to: 'ben' });
+    adapter.receiveCall(`${prefix}=carol`);
+    const accepted = await invites[0]!.accept();
+    const pendingCallId = adapter.receiveCall('+38344555666');
+    const hangup = jest.spyOn(adapter, 'hangup');
+    const reject = jest.spyOn(adapter, 'reject');
+    const unregister = jest.spyOn(adapter, 'unregister');
+
+    await client.destroy();
+
+    expect(hangup.mock.calls).toEqual([[placed.id], [accepted.id]]);
+    expect(reject.mock.calls).toEqual([[pendingCallId]]);
+    expect(Math.max(...hangup.mock.invocationCallOrder, ...reject.mock.invocationCallOrder)).toBeLessThan(
+      unregister.mock.invocationCallOrder[0]!,
+    );
+    expect(invites[1]!.state).toBe('rejected');
+    expect(client).toMatchObject({ calls: [], activeCall: null, isBusy: false });
+  });
+
+  test('destroy logs a call it fails to end and still unregisters', async () => {
+    const logger = { error: jest.fn(), warn: jest.fn(), info: jest.fn(), debug: jest.fn() };
+    const client = createClient({ logger, logLevel: 'warn' });
+    await client.register();
+    await client.connect({ to: 'ben' });
+    const failure = new NetworkError();
+    adapter.failNext('hangup', failure);
+    const unregister = jest.spyOn(adapter, 'unregister');
+
+    await client.destroy();
+
+    expect(logger.warn).toHaveBeenCalledWith(`Ending a call on destroy failed: ${failure}`);
+    expect(unregister).toHaveBeenCalledTimes(1);
+  });
+
+  test('a call still dialing when the client is destroyed is hung up, and connect rejects', async () => {
+    const client = createClient();
+    await client.register();
+    let dialed!: (callId: string) => void;
+    jest.spyOn(adapter, 'call').mockImplementationOnce(() => new Promise((resolve) => (dialed = resolve)));
+    const hangup = jest.spyOn(adapter, 'hangup');
+
+    const connecting = client.connect({ to: 'ben' });
+    await client.destroy();
+    dialed('mock-call-7');
+
+    await expect(connecting).rejects.toMatchObject({
+      code: 'NOT_REGISTERED',
+      message: 'The client was destroyed.',
+    });
+    expect(hangup).toHaveBeenCalledWith('mock-call-7');
+    expect(client.calls).toEqual([]);
   });
 });

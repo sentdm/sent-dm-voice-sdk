@@ -1,10 +1,5 @@
-import type {
-  CallEvent,
-  CallStats,
-  CallTarget,
-  IncomingCall,
-  ProviderAdapter,
-} from '@sentdm/voice/adapter/types';
+import type { CallEvent, CallTarget, IncomingCall, ProviderAdapter } from '@sentdm/voice/adapter/types';
+import type { CallStats } from '@sentdm/voice/call';
 import type { SentVoiceError } from '@sentdm/voice/errors';
 
 type Step<Event> = Event extends CallEvent ? Omit<Event, 'callId'> & { after?: number } : never;

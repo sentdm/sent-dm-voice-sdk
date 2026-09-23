@@ -7,6 +7,19 @@ import * as errors from '@sentdm/voice/errors';
 const distDir = path.resolve(__dirname, '..', 'dist');
 const entries = ['@sentdm/voice', '@sentdm/voice/errors', '@sentdm/voice/react'];
 const formats = ['cjs', 'esm'] as const;
+const namespaceTypes = [
+  'ConnectParams',
+  'JoinConferenceParams',
+  'ClientState',
+  'CallState',
+  'Address',
+  'CallStats',
+  'DisconnectInfo',
+  'QualityWarning',
+  'CancelInfo',
+  'Call',
+  'CallInvite',
+];
 
 const runInDist = (format: (typeof formats)[number], body: string): unknown => {
   const load =
@@ -61,6 +74,23 @@ console.log(JSON.stringify(result));`,
       expect(result).toEqual(Object.fromEntries(subclassNames.map((name) => [name, true])));
     },
   );
+
+  test.each(formats)('every SentVoice namespace type resolves from the default export as %s', (format) => {
+    const file = path.join(distDir, format === 'cjs' ? 'types.cts' : 'types.mts');
+    const source = `import SentVoice from '@sentdm/voice';
+export type Types = [${namespaceTypes.map((type) => `SentVoice.${type}`).join(', ')}];`;
+    const options = { module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext };
+    const host = ts.createCompilerHost(options);
+    const { fileExists, readFile } = host;
+    host.fileExists = (fileName) => fileName === file || fileExists(fileName);
+    host.readFile = (fileName) => (fileName === file ? source : readFile(fileName));
+
+    const messages = ts
+      .getPreEmitDiagnostics(ts.createProgram([file], options, host))
+      .map(({ messageText }) => ts.flattenDiagnosticMessageText(messageText, '\n'));
+
+    expect(messages).toEqual([]);
+  });
 
   test('adapter types are not reachable from any public entry point', () => {
     const { exports } = JSON.parse(fs.readFileSync(path.join(distDir, 'package.json'), 'utf8')) as {

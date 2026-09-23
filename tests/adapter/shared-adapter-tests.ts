@@ -1,11 +1,16 @@
-import type { AdapterFactory, CallEvent, CallTarget, ProviderAdapter } from '@sentdm/voice/adapter/types';
+import type { CallEvent, CallTarget, IncomingCall, ProviderAdapter } from '@sentdm/voice/adapter/types';
 
 const prefix = '0f8fad5b-d9cb-469f-a165-70867728950e';
+const caller = `${prefix}=agent-42`;
 const phone: CallTarget = { kind: 'number', number: '+38349111222' };
 
-export function describeSharedAdapterTests(name: string, createAdapter: AdapterFactory): void {
+export function describeSharedAdapterTests<Adapter extends ProviderAdapter>(
+  name: string,
+  createAdapter: () => Promise<Adapter>,
+  receiveCall: (adapter: Adapter, from: string) => void,
+): void {
   describe(`${name} shared tests`, () => {
-    let adapter: ProviderAdapter;
+    let adapter: Adapter;
 
     beforeEach(async () => {
       adapter = await createAdapter();
@@ -39,6 +44,44 @@ export function describeSharedAdapterTests(name: string, createAdapter: AdapterF
       await adapter.hangup(callId);
 
       expect(await ended).toEqual({ callId, type: 'ended', reason: 'completed' });
+    });
+
+    test('an incoming call reaches onIncoming with its wire caller, and answer connects it', async () => {
+      const incoming = new Promise<IncomingCall>((resolve) => adapter.onIncoming(resolve));
+      receiveCall(adapter, caller);
+      const { callId, from } = await incoming;
+      const events: CallEvent[] = [];
+      const connected = new Promise<void>((resolve) =>
+        adapter.onCallEvent((event) => {
+          if (event.callId !== callId) return;
+          events.push(event);
+          if (event.type === 'connected') resolve();
+        }),
+      );
+
+      await adapter.answer(callId);
+      await connected;
+
+      expect(from).toBe(caller);
+      expect(events).toEqual([
+        { callId, type: 'answered' },
+        { callId, type: 'connected' },
+      ]);
+    });
+
+    test('reject ends an incoming call', async () => {
+      const incoming = new Promise<IncomingCall>((resolve) => adapter.onIncoming(resolve));
+      receiveCall(adapter, caller);
+      const { callId } = await incoming;
+      const ended = new Promise<CallEvent>((resolve) =>
+        adapter.onCallEvent((event) => {
+          if (event.callId === callId && event.type === 'ended') resolve(event);
+        }),
+      );
+
+      await adapter.reject(callId);
+
+      expect(await ended).toMatchObject({ callId, type: 'ended' });
     });
 
     test('mute, sendDigits and getStats work on a live call', async () => {
