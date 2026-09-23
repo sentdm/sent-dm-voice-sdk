@@ -94,9 +94,11 @@ export type Types = [${namespaceTypes.map((type) => `SentVoice.${type}`).join(',
 
   test('adapter types are not reachable from any public entry point', () => {
     const { exports } = JSON.parse(fs.readFileSync(path.join(distDir, 'package.json'), 'utf8')) as {
-      exports: Record<string, { require: { types: string }; types: string }>;
+      exports: Record<string, string | { require: { types: string }; types: string }>;
     };
-    const declarations = Object.values(exports).flatMap((entry) => [entry.require.types, entry.types]);
+    const declarations = Object.values(exports).flatMap((entry) =>
+      typeof entry === 'string' ? [] : [entry.require.types, entry.types],
+    );
     const program = ts.createProgram(
       declarations.map((declaration) => path.join(distDir, declaration)),
       { module: ts.ModuleKind.NodeNext, moduleResolution: ts.ModuleResolutionKind.NodeNext },
@@ -104,5 +106,13 @@ export type Types = [${namespaceTypes.map((type) => `SentVoice.${type}`).join(',
     const reached = program.getSourceFiles().map((file) => path.relative(distDir, file.fileName));
 
     expect(reached.filter((file) => file.startsWith('adapter/'))).toEqual([]);
+  });
+
+  test('the service worker ships as @sentdm/voice/sw.js', () => {
+    const worker = runInDist('cjs', `console.log(JSON.stringify(require.resolve('@sentdm/voice/sw.js')));`);
+
+    expect(fs.readFileSync(worker as string, 'utf8')).toBe(
+      fs.readFileSync(path.resolve(__dirname, '..', 'src', 'sw.js'), 'utf8'),
+    );
   });
 });

@@ -80,6 +80,7 @@
       },
       "types": "./dist/react/index.d.mts",
       "default": "./dist/react/index.mjs"
-    }
+    },
+    "./sw.js": "./dist/sw.js"
   }
 }

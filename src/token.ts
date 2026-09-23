@@ -75,7 +75,7 @@ function jitter(): number {
   return 1 - Math.random() * 0.25;
 }
 
-function readClaims(jwt: string): Record<string, unknown> {
+export function readClaims(jwt: string): Record<string, unknown> {
   const parts = jwt.split('.');
   const payload = parts.length === 3 ? parts[1] : undefined;
   if (payload === undefined) return {};

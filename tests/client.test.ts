@@ -65,6 +65,16 @@ describe('SentVoice', () => {
     expect(client).toMatchObject({ state: 'registered', identity: 'agent-42', number: '+38349111222' });
   });
 
+  test('register hands the service worker and audio element options to the adapter', async () => {
+    const serviceWorker = { url: '/voice/sw.js', scope: '/voice/' };
+    const element = {} as HTMLAudioElement;
+    const client = createClient({ serviceWorker, audio: { element } });
+
+    await client.register();
+
+    expect(loadAdapter).toHaveBeenCalledWith({ serviceWorker, audioElement: element });
+  });
+
   test('register while registering or registered does not register again', async () => {
     const client = createClient();
     const registering = jest.fn();

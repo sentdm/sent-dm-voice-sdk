@@ -1,5 +1,6 @@
+/// <reference lib="dom" />
 import { loadAdapter } from './adapter/loader';
-import type { CallEvent, IncomingCall, ProviderAdapter } from './adapter/types';
+import type { AdapterOptions, CallEvent, IncomingCall, ProviderAdapter } from './adapter/types';
 import {
   Call,
   type Address,
@@ -43,6 +44,20 @@ export interface SentVoiceOptions {
    * Defaults to globalThis.console.
    */
   logger?: Logger | undefined;
+
+  /**
+   * Where your app serves the service worker that delivers incoming calls, a copy of
+   * `@sentdm/voice/sw.js`. `url` is resolved against the page and defaults to `sw.js`;
+   * `scope` defaults to the worker's folder.
+   */
+  serviceWorker?: { url?: string | undefined; scope?: string | undefined } | undefined;
+
+  audio?:
+    | {
+        /** Plays the other party's audio through this element instead of one the SDK creates. */
+        element?: HTMLAudioElement | undefined;
+      }
+    | undefined;
 }
 
 export interface SentVoiceEvents {
@@ -73,6 +88,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
   #tokenProvider: () => Promise<string>;
   #registerRetries: number;
   #log: Log;
+  #adapterOptions: AdapterOptions;
   #state: SentVoice.ClientState = 'unregistered';
   #token: VoiceToken | undefined;
   #adapter: Promise<ProviderAdapter> | undefined;
@@ -87,7 +103,14 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
   #calls: Call[] = [];
   #activeCall: Call | null = null;
 
-  constructor({ tokenProvider, registerRetries = 2, logLevel, logger = console }: SentVoiceOptions) {
+  constructor({
+    tokenProvider,
+    registerRetries = 2,
+    logLevel,
+    logger = console,
+    serviceWorker,
+    audio,
+  }: SentVoiceOptions) {
     super();
     this.#tokenProvider = tokenProvider;
     this.#registerRetries = registerRetries;
@@ -95,6 +118,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
       logger,
       parseLogLevel(logLevel, 'SentVoiceOptions.logLevel', createLog(logger, 'warn')) ?? 'warn',
     );
+    this.#adapterOptions = { serviceWorker, audioElement: audio?.element };
   }
 
   get state(): SentVoice.ClientState {
@@ -276,7 +300,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
   }
 
   async #loadAdapter(): Promise<ProviderAdapter> {
-    const adapter = await loadAdapter();
+    const adapter = await loadAdapter(this.#adapterOptions);
     adapter.onIncoming((incoming) => this.#onIncoming(adapter, incoming));
     adapter.onCallEvent((event) => this.#onCallEvent(event));
     return adapter;

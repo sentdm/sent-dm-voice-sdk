@@ -10,7 +10,9 @@ const problems = Object.values(JSON.parse(fs.readFileSync('.attw.json', 'utf-8')
         (problem.kind === 'MissingExportEquals' && problem.implementationFileName.endsWith('/index.js')) ||
         // this is intentional, we deliberately attempt to import types that may not exist from parent node_modules
         // folders to better support various runtimes without triggering automatic type acquisition.
-        (problem.kind === 'InternalResolutionError' && problem.moduleSpecifier.includes('node_modules'))
+        (problem.kind === 'InternalResolutionError' && problem.moduleSpecifier.includes('node_modules')) ||
+        // The service worker is a browser script that apps serve, not a module with types.
+        (problem.kind === 'UntypedResolution' && problem.entrypoint === './sw.js')
       ),
   );
 fs.unlinkSync('.attw.json');

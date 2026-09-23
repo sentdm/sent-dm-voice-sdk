@@ -1,4 +1,5 @@
 import type { CallEvent, CallTarget, IncomingCall, ProviderAdapter } from '@sentdm/voice/adapter/types';
+import { voiceToken } from '../voice-token';
 
 const prefix = '0f8fad5b-d9cb-469f-a165-70867728950e';
 const caller = `${prefix}=agent-42`;
@@ -14,13 +15,13 @@ export function describeSharedAdapterTests<Adapter extends ProviderAdapter>(
 
     beforeEach(async () => {
       adapter = await createAdapter();
-      await adapter.register('token');
+      await adapter.register(voiceToken());
     });
 
     test('register refreshes the token while registered and registers again after unregister', async () => {
-      await expect(adapter.register('refreshed token')).resolves.toBeUndefined();
+      await expect(adapter.register(voiceToken())).resolves.toBeUndefined();
       await expect(adapter.unregister()).resolves.toBeUndefined();
-      await expect(adapter.register('token')).resolves.toBeUndefined();
+      await expect(adapter.register(voiceToken())).resolves.toBeUndefined();
     });
 
     test('calls to a user, a number and a room get distinct call ids', async () => {

@@ -1,3 +1,4 @@
+/// <reference lib="dom" />
 import type { CallStats } from '../call';
 import type { SentVoiceError } from '../errors';
 
@@ -33,7 +34,12 @@ export interface ProviderAdapter {
   setOutputDevice(deviceId: string): Promise<void>;
 }
 
-export type AdapterFactory = () => Promise<ProviderAdapter>;
+export type AdapterFactory = (options: AdapterOptions) => Promise<ProviderAdapter>;
+
+export interface AdapterOptions {
+  serviceWorker?: { url?: string | undefined; scope?: string | undefined } | undefined;
+  audioElement?: HTMLAudioElement | undefined;
+}
 
 export type CallTarget = { kind: 'user'; id: string } | { kind: 'number'; number: string };
 

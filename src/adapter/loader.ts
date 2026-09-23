@@ -1,6 +1,4 @@
-import { CapabilityUnsupportedError } from '../errors';
+import { loadSinchAdapter } from './sinch';
 import type { AdapterFactory } from './types';
 
-export const loadAdapter: AdapterFactory = async () => {
-  throw new CapabilityUnsupportedError({ message: 'No calling provider is available.' });
-};
+export const loadAdapter: AdapterFactory = loadSinchAdapter;
