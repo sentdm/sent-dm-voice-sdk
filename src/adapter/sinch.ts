@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import type { Call, CallClient, CallListener, SinchClient } from 'sinch-rtc';
+import type { Call, CallClient, CallListener, CallQualityWarningEvent, SinchClient } from 'sinch-rtc';
 import type { CallStats } from '../call';
 import {
   CapabilityUnsupportedError,
@@ -227,6 +227,10 @@ class SinchAdapter implements ProviderAdapter {
       onCallProgressing: () => this.#emit({ callId: call.id, type: 'ringing' }),
       onCallAnswered: () => this.#emit({ callId: call.id, type: 'answered' }),
       onCallEstablished: () => this.#emit({ callId: call.id, type: 'connected' }),
+      onCallQualityWarningEvent: (_, warning) => {
+        const event = this.#warning(call.id, warning);
+        if (event) this.#emit(event);
+      },
       onCallEnded: () => {
         call.removeListener(listener);
         this.#calls.delete(call.id);
@@ -267,6 +271,22 @@ class SinchAdapter implements ProviderAdapter {
         };
       default:
         return { callId, type: 'ended', reason: 'completed' };
+    }
+  }
+
+  #warning(callId: string, { name, type }: CallQualityWarningEvent): CallEvent | undefined {
+    const cleared = type === this.#sinch.CallQualityWarningEventType.Recover;
+    switch (name) {
+      case 'missingMediaStream':
+        return { callId, type: cleared ? 'reconnected' : 'reconnecting' };
+      case 'highInboundJitter':
+        return { callId, type: 'qualityWarning', warning: { metric: 'jitter', cleared } };
+      case 'highInboundPacketLoss':
+        return { callId, type: 'qualityWarning', warning: { metric: 'packetLoss', cleared } };
+      case 'highRemoteInboundRtt':
+        return { callId, type: 'qualityWarning', warning: { metric: 'rtt', cleared } };
+      default:
+        return undefined;
     }
   }
 

@@ -120,6 +120,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
   #timer: ReturnType<typeof setTimeout> | undefined;
   #wake: (() => void) | undefined;
   #updates = new Map<string, (state: Exclude<CallState, 'initiated'>, error?: SentVoiceError) => void>();
+  #warnings = new Map<string, (warning: QualityWarning) => void>();
   #invites = new Map<string, CallInvite>();
   #calls: Call[] = [];
   #activeCall: Call | null = null;
@@ -403,6 +404,10 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
   }
 
   #onCallEvent(event: CallEvent): void {
+    if (event.type === 'qualityWarning') {
+      this.#warnings.get(event.callId)?.(event.warning);
+      return;
+    }
     const update = this.#updates.get(event.callId);
     if (!update) return;
     if (event.type !== 'ended') {
@@ -411,6 +416,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
     }
 
     this.#updates.delete(event.callId);
+    this.#warnings.delete(event.callId);
     this.#invites.delete(event.callId);
     this.#calls = this.#calls.filter((call) => call.id !== event.callId);
     if (this.#activeCall?.id === event.callId) {
@@ -434,6 +440,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
       sendDigits: (digits) => adapter.sendDigits(callId, digits),
       getStats: () => adapter.getStats(callId),
       onUpdate: (update) => this.#updates.set(callId, update),
+      onQualityWarning: (warn) => this.#warnings.set(callId, warn),
     });
     this.#telemetry?.callStarted(call);
     return call;

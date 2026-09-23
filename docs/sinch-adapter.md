@@ -12,7 +12,8 @@ checklist at the end has been run against a live application.
 - Release cadence in 2026: 2.42.6 (Feb 25), 2.44.4 (Mar 16), 2.45.5 (Apr 8), 2.46.8 (Apr 16), 2.46.9 (Apr 20),
   2.47.7 (Jun 23), 2.48.11 (Jul 15), 2.49.11 (Sep 18): a minor release every three to eight weeks.
 - Before upgrading, re-check every call listed in [Calls](#calls), the listener callbacks in [Events](#events),
-  `CallEndCause`, and the untyped `getPeerConnectionStats()`, then run the checklist.
+  `CallEndCause`, the quality warning names and thresholds, and the untyped `getPeerConnectionStats()`, then run
+  the checklist.
 
 ## Loading
 
@@ -81,16 +82,49 @@ the WebRTC bundle out of pages that never register.
 
 ## Events
 
-| `sinch-rtc`         | Seam                  |
-| ------------------- | --------------------- |
-| `onCallProgressing` | `ringing`             |
-| `onCallAnswered`    | `answered`            |
-| `onCallEstablished` | `connected`           |
-| `onCallEnded`       | `ended`, mapped below |
+| `sinch-rtc`                                         | Seam                                 |
+| --------------------------------------------------- | ------------------------------------ |
+| `onCallProgressing`                                 | `ringing`                            |
+| `onCallAnswered`                                    | `answered`                           |
+| `onCallEstablished`                                 | `connected`                          |
+| `onCallQualityWarningEvent` `missingMediaStream`    | `reconnecting`, `reconnected`        |
+| `onCallQualityWarningEvent` `highInboundJitter`     | `qualityWarning` metric `jitter`     |
+| `onCallQualityWarningEvent` `highInboundPacketLoss` | `qualityWarning` metric `packetLoss` |
+| `onCallQualityWarningEvent` `highRemoteInboundRtt`  | `qualityWarning` metric `rtt`        |
+| `onCallEnded`                                       | `ended`, mapped below                |
 
 - `onCallRinging` is not mapped: _source:_ `onCallProgressing` always fires first.
-- _Source:_ there are no reconnect callbacks, so `reconnecting` and `reconnected` never fire on this provider.
-  Media that drops after connecting ends the call five minutes later with `Inactive`.
+- Each warning arrives as `Trigger`, then `Recover`, which becomes `reconnected` or a `qualityWarning` with
+  `cleared: true`. _Source:_ the warnings are checked from the moment the call is established until it ends, and
+  one still raised when the call ends is never recovered. The audio level warnings (`constantInboundAudioLevel`,
+  `constantOutboundAudioLevel`, `zeroInboundAudioLevel`, `zeroOutboundAudioLevel`) are not mapped.
+- _Source:_ there are no reconnect callbacks. `missingMediaStream` fires when the ICE connection has not been
+  `connected` for 2 s after the call was established, and recovers when it is `connected` again. It counts every
+  other ICE state as missing, `completed` included.
+- _Source:_ `sinch-rtc` never restarts ICE. Media that comes back on the same network recovers the call; after a
+  network switch it cannot. Media that stays down ends the call with `Inactive` five minutes after it dropped,
+  unless the call ends another way first.
+
+Quality thresholds (_source_; stats are read every 500 ms):
+
+| Warning                 | Raised when                                                                        | Recovered when                      |
+| ----------------------- | ---------------------------------------------------------------------------------- | ----------------------------------- |
+| `highInboundJitter`     | inbound audio jitter above 30 ms in 3 of the last 4 samples                        | fewer than 3 of the last 4          |
+| `highInboundPacketLoss` | inbound audio packets lost above 1% of those received, per sample, 3 of the last 4 | fewer than 3 of the last 4          |
+| `highRemoteInboundRtt`  | round-trip time reported by the remote side above 300 ms in the latest sample      | the latest sample is 300 ms or less |
+
+The round-trip time warning has no hysteresis, so it can go on and off while the time hovers around 300 ms.
+
+## Network changes
+
+_Source:_ a registered client holds no open connection. Incoming calls arrive as pushes through the service
+worker, and the signaling channel only opens for a call.
+
+- Sleep, a network switch or going offline leave the client registered, and nothing tells the core. Calls that
+  arrive meanwhile are missed.
+- The refresh timer can fire in that gap, and runs late after sleep: the token provider fails, the retries run
+  out, the client goes `offline`, and the slow loop registers it again once the token provider is reachable.
+- A call in progress follows [Events](#events): `reconnecting`, then `reconnected` or the `Inactive` end.
 
 ## End causes
 
@@ -167,3 +201,12 @@ error to [Error mapping](#error-mapping).
 9. Refresh: a short-lived token; a token provider that starts failing mid-call.
 10. Read `call.headers` on both sides of a call.
 11. Deny notification permission and confirm `register()` rejects.
+12. During a call: turn the network off for 10 s and back on; switch networks (Wi-Fi to cable or a hotspot);
+    record `reconnecting`, `reconnected` and the end cause. Confirm a healthy call never reports `reconnecting`
+    (the `completed` ICE state).
+13. Sleep the laptop for a few minutes, while idle and during a call. After waking, confirm incoming calls ring
+    again, and record what the call did.
+14. With a short-lived token, go offline until a refresh fails: confirm `offline`, then `registered` once back
+    online.
+15. Degrade the network during a call (loss, delay and jitter with an OS-level network conditioner) and record
+    which quality warnings are raised and cleared.

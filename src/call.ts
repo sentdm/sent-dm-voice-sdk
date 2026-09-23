@@ -31,8 +31,6 @@ export interface DisconnectInfo {
 
 export interface QualityWarning {
   metric: 'jitter' | 'packetLoss' | 'rtt';
-  value: number;
-  threshold: number;
   cleared: boolean;
 }
 
@@ -54,6 +52,7 @@ interface CallProvider {
   sendDigits(digits: string): void;
   getStats(): Promise<CallStats>;
   onUpdate(listener: (state: Exclude<CallState, 'initiated'>, error?: SentVoiceError) => void): void;
+  onQualityWarning(listener: (warning: QualityWarning) => void): void;
 }
 
 const isEnded = (state: CallState): state is DisconnectInfo['state'] =>
@@ -84,6 +83,7 @@ export class Call extends TypedEmitter<CallEvents> {
     this.#provider = provider;
     this.#state = direction === 'inbound' ? 'ringing' : 'initiated';
     provider.onUpdate((state, error) => this.#update(state, error));
+    provider.onQualityWarning((warning) => this.emit('qualityWarning', warning));
   }
 
   get state(): CallState {

@@ -1,8 +1,9 @@
 import { CallEndCause } from 'sinch-rtc/npm/src/calling/CallEndCause';
+import { CallQualityWarningEventType } from 'sinch-rtc/npm/src/calling/quality/CallQualityWarningEventType';
 import { ErrorType, SinchError } from 'sinch-rtc/npm/src/SinchError';
 import { ArgumentError } from 'sinch-rtc/npm/src/utils/Errors';
 
-export { CallEndCause, ErrorType, SinchError };
+export { CallEndCause, CallQualityWarningEventType, ErrorType, SinchError };
 
 interface ClientListener {
   onCredentialsRequired(client: FakeClient, registration: { register(jwt: string): Promise<void> }): void;
@@ -19,6 +20,10 @@ interface CallListener {
   onCallAnswered?(call: FakeCall): void;
   onCallEstablished?(call: FakeCall): void;
   onCallEnded?(call: FakeCall): void;
+  onCallQualityWarningEvent?(
+    call: FakeCall,
+    event: { name: string; type: CallQualityWarningEventType },
+  ): void;
 }
 
 export const clients: FakeClient[] = [];
@@ -88,6 +93,10 @@ export class FakeCall {
     this.#emit('onCallEnded');
   }
 
+  warn(name: string, type: CallQualityWarningEventType): void {
+    for (const listener of [...this.#listeners]) listener.onCallQualityWarningEvent?.(this, { name, type });
+  }
+
   mute(): void {}
 
   unmute(): void {}
@@ -100,7 +109,7 @@ export class FakeCall {
     return this.stats;
   }
 
-  #emit(event: keyof CallListener): void {
+  #emit(event: Exclude<keyof CallListener, 'onCallQualityWarningEvent'>): void {
     for (const listener of [...this.#listeners]) listener[event]?.(this);
   }
 }

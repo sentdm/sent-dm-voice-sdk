@@ -12,7 +12,10 @@
   "files": [
     "**/*"
   ],
-  "private": true,
+  "private": false,
+  "publishConfig": {
+    "access": "restricted"
+  },
   "scripts": {
     "test": "./scripts/test",
     "build": "./scripts/build",

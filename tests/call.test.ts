@@ -155,6 +155,24 @@ describe('Call', () => {
     ]);
   });
 
+  test('quality warnings the provider raises and clears reach the call as qualityWarning events', async () => {
+    adapter.scriptNextCall([
+      { type: 'connected' },
+      { type: 'qualityWarning', warning: { metric: 'packetLoss', cleared: false }, after: 5_000 },
+      { type: 'qualityWarning', warning: { metric: 'packetLoss', cleared: true }, after: 3_000 },
+    ]);
+    const call = await client.connect({ to: 'ben' });
+    const warnings: SentVoice.QualityWarning[] = [];
+    call.on('qualityWarning', (warning) => warnings.push(warning));
+
+    jest.advanceTimersByTime(8_000);
+
+    expect(warnings).toEqual([
+      { metric: 'packetLoss', cleared: false },
+      { metric: 'packetLoss', cleared: true },
+    ]);
+  });
+
   test('mute toggles without an argument, reaching the provider and reporting each change once', async () => {
     const call = await client.connect({ to: 'ben' });
     const mute = jest.spyOn(adapter, 'mute');

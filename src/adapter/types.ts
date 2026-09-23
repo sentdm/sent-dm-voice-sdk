@@ -1,5 +1,5 @@
 /// <reference lib="dom" />
-import type { CallStats } from '../call';
+import type { CallStats, QualityWarning } from '../call';
 import type { SentVoiceError } from '../errors';
 
 /**
@@ -54,6 +54,7 @@ export type CallEvent =
   | { callId: string; type: 'connected' }
   | { callId: string; type: 'reconnecting' }
   | { callId: string; type: 'reconnected' }
+  | { callId: string; type: 'qualityWarning'; warning: QualityWarning }
   | {
       callId: string;
       type: 'ended';

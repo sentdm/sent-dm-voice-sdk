@@ -54,6 +54,18 @@ jobs:
       - name: Check build
         run: ./scripts/build
 
+      - name: Check publish
+        run: cd dist && pnpm publish --dry-run --no-git-checks
+
+      - name: Pack tarball
+        run: cd dist && pnpm pack
+
+      - name: Upload tarball
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sentdm-voice
+          path: dist/*.tgz
+
   test:
     timeout-minutes: 10
     name: test

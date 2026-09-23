@@ -5,6 +5,7 @@ import { prefix, voiceToken } from '../voice-token';
 import { describeSharedAdapterTests } from './shared-adapter-tests';
 import {
   CallEndCause,
+  CallQualityWarningEventType,
   ErrorType,
   FakeAudio,
   SinchError,
@@ -178,6 +179,30 @@ describe('SinchAdapter', () => {
       { callId, type: 'answered' },
       { callId, type: 'connected' },
       { callId, type: 'ended', reason: 'completed' },
+    ]);
+  });
+
+  test('provider warnings arrive as reconnecting and reconnected for missing media, and as quality warnings for jitter, packet loss and round-trip time', async () => {
+    await adapter.register(voiceToken());
+    const callId = await adapter.call(phone);
+    const call = calls.get(callId)!;
+    const { Trigger, Recover } = CallQualityWarningEventType;
+
+    call.warn('missingMediaStream', Trigger);
+    call.warn('missingMediaStream', Recover);
+    call.warn('highInboundJitter', Trigger);
+    call.warn('highInboundPacketLoss', Trigger);
+    call.warn('highRemoteInboundRtt', Trigger);
+    call.warn('highRemoteInboundRtt', Recover);
+    call.warn('zeroInboundAudioLevel', Trigger);
+
+    expect(events).toEqual([
+      { callId, type: 'reconnecting' },
+      { callId, type: 'reconnected' },
+      { callId, type: 'qualityWarning', warning: { metric: 'jitter', cleared: false } },
+      { callId, type: 'qualityWarning', warning: { metric: 'packetLoss', cleared: false } },
+      { callId, type: 'qualityWarning', warning: { metric: 'rtt', cleared: false } },
+      { callId, type: 'qualityWarning', warning: { metric: 'rtt', cleared: true } },
     ]);
   });
 

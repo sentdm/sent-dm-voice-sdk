@@ -93,6 +93,32 @@ export type Types = [${namespaceTypes.map((type) => `SentVoice.${type}`).join(',
     expect(messages).toEqual([]);
   });
 
+  test('every TypeScript sample in the README compiles against the built package', () => {
+    const readme = fs.readFileSync(path.resolve(__dirname, '..', 'README.md'), 'utf8');
+    const samples = new Map(
+      [...readme.matchAll(/```(tsx?)\n([\s\S]*?)```/g)].map(([, language, code], index) => [
+        path.join(distDir, `readme-${index}.${language}`),
+        code,
+      ]),
+    );
+    const options = {
+      module: ts.ModuleKind.NodeNext,
+      moduleResolution: ts.ModuleResolutionKind.NodeNext,
+      types: ['node'],
+      jsx: ts.JsxEmit.ReactJSX,
+    };
+    const host = ts.createCompilerHost(options);
+    const { fileExists, readFile } = host;
+    host.fileExists = (fileName) => samples.has(fileName) || fileExists(fileName);
+    host.readFile = (fileName) => samples.get(fileName) ?? readFile(fileName);
+
+    const messages = ts
+      .getPreEmitDiagnostics(ts.createProgram([...samples.keys()], options, host))
+      .map(({ messageText }) => ts.flattenDiagnosticMessageText(messageText, '\n'));
+
+    expect(messages).toEqual([]);
+  });
+
   test('adapter types are not reachable from any public entry point', () => {
     const { exports } = JSON.parse(fs.readFileSync(path.join(distDir, 'package.json'), 'utf8')) as {
       exports: Record<string, string | { require: { types: string }; types: string }>;
