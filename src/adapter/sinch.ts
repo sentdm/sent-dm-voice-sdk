@@ -204,7 +204,7 @@ class SinchAdapter implements ProviderAdapter {
   }
 
   #useInput(callClient: CallClient, deviceId: string): void {
-    callClient.setAudioTrackConstraints({ deviceId: { exact: deviceId } });
+    callClient.setAudioTrackConstraints({ deviceId });
   }
 
   #playback(): HTMLAudioElement {

@@ -1,6 +1,7 @@
 /// <reference lib="dom" />
 import { loadAdapter } from './adapter/loader';
 import type { AdapterOptions, CallEvent, IncomingCall, ProviderAdapter } from './adapter/types';
+import { AudioController, type AudioLifecycle } from './audio';
 import {
   Call,
   type Address,
@@ -54,6 +55,16 @@ export interface SentVoiceOptions {
 
   audio?:
     | {
+        /**
+         * The microphone to start with, a `deviceId` from `client.audio.inputDevices()`. The default
+         * one is used while the device is missing.
+         */
+        inputDeviceId?: string | undefined;
+        /**
+         * The speaker to start with, a `deviceId` from `client.audio.outputDevices()`. The default
+         * one is used when the device cannot be chosen.
+         */
+        outputDeviceId?: string | undefined;
         /** Plays the other party's audio through this element instead of one the SDK creates. */
         element?: HTMLAudioElement | undefined;
       }
@@ -85,6 +96,7 @@ const isName = (value: string, maxLength: number) => value.length <= maxLength &
 export class SentVoice extends TypedEmitter<SentVoiceEvents> {
   static readonly version: string = VERSION;
 
+  readonly audio: AudioController;
   #tokenProvider: () => Promise<string>;
   #registerRetries: number;
   #log: Log;
@@ -102,6 +114,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
   #invites = new Map<string, CallInvite>();
   #calls: Call[] = [];
   #activeCall: Call | null = null;
+  #audioLifecycle: AudioLifecycle | undefined;
 
   constructor({
     tokenProvider,
@@ -119,6 +132,12 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
       parseLogLevel(logLevel, 'SentVoiceOptions.logLevel', createLog(logger, 'warn')) ?? 'warn',
     );
     this.#adapterOptions = { serviceWorker, audioElement: audio?.element };
+    this.audio = new AudioController(this.#log, audio?.inputDeviceId, audio?.outputDeviceId, {
+      check: () => {
+        if (this.#state === 'destroyed') throw destroyedError();
+      },
+      onLifecycle: (lifecycle) => (this.#audioLifecycle = lifecycle),
+    });
   }
 
   get state(): SentVoice.ClientState {
@@ -208,6 +227,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
     if (this.#state === 'destroyed') return;
 
     this.#stop('destroyed');
+    this.#audioLifecycle?.destroyed();
     const endings = [
       ...[...this.#invites.values()].map((invite) => invite.reject()),
       ...this.#calls.map((call) => call.disconnect()),
@@ -303,6 +323,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
     const adapter = await loadAdapter(this.#adapterOptions);
     adapter.onIncoming((incoming) => this.#onIncoming(adapter, incoming));
     adapter.onCallEvent((event) => this.#onCallEvent(event));
+    this.#audioLifecycle?.loaded(adapter);
     return adapter;
   }
 
@@ -383,6 +404,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
     from: Address,
     to: Address,
   ): Call {
+    this.#audioLifecycle?.callStarted();
     return new Call(callId, direction, from, to, {
       hangup: () => adapter.hangup(callId),
       mute: (muted) => adapter.mute(callId, muted),
@@ -485,4 +507,6 @@ export declare namespace SentVoice {
   };
 
   export { type CallInvite as CallInvite, type CancelInfo as CancelInfo };
+
+  export { type AudioController as AudioController };
 }

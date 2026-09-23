@@ -63,7 +63,7 @@ the WebRTC bundle out of pages that never register.
 | `mute`             | `call.mute()` / `call.unmute()`                                   |
 | `sendDigits`       | `call.sendDtmf(digits)`                                           |
 | `getStats`         | `call.getPeerConnectionStats()`, present on calls but not typed   |
-| `setInputDevice`   | `callClient.setAudioTrackConstraints({ deviceId: { exact } })`    |
+| `setInputDevice`   | `callClient.setAudioTrackConstraints({ deviceId })`               |
 | `setOutputDevice`  | `setSinkId()` on the playback element                             |
 
 - `getStats` reads the inbound audio `jitter` (seconds, reported in ms), packet loss as
@@ -71,6 +71,9 @@ the WebRTC bundle out of pages that never register.
   (seconds, reported in ms). Anything not measured yet reads 0.
 - `setInputDevice` applies to live and future calls. Before the client has started, the device is kept and
   applied on start. `setOutputDevice` throws `CapabilityUnsupportedError` where the browser has no `setSinkId`.
+- The input device is preferred, not required (no `exact`): a missing one falls back to the default. _Source:_
+  `sinch-rtc` carries on with an empty stream when `getUserMedia` fails, so a required device that is missing
+  would leave a placed call without a microphone, make answering fail and cut the microphone of a live call.
 - `sinch-rtc` plays no audio. One playback element, `audio.element` or an `Audio` the adapter creates, plays
   the latest placed call from the moment it is placed (early media) or the latest answered incoming call, and
   is cleared when that call ends.
@@ -122,6 +125,8 @@ Unmapped errors keep the raw error in `providerDetail`. Known ones:
   cause, so a rejected token, a network failure and a push setup failure look alike.
 - Service worker registration failures from `setSupportManagedPush()`.
 - `sendDtmf()` rejecting keys outside `0-9`, `#`, `*` and `A-D`.
+- `setSinkId()` rejecting an id the page cannot list (`NotFoundError`). Output ids are only listed once the
+  microphone has been opened in the page, so a saved output device can fail until the first call.
 - Failed call-setup requests (HTTP domain), for example `Unable to connect call`.
 
 Observed during the manual checklist: none yet.

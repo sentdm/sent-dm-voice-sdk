@@ -319,9 +319,9 @@ describe('SinchAdapter', () => {
   test('an input device chosen before register applies once the client starts, and at once afterwards', async () => {
     await adapter.setInputDevice('microphone-id');
     await adapter.register(voiceToken());
-    expect(lastClient().callClient.constraints).toEqual({ deviceId: { exact: 'microphone-id' } });
+    expect(lastClient().callClient.constraints).toEqual({ deviceId: 'microphone-id' });
 
     await adapter.setInputDevice('headset-id');
-    expect(lastClient().callClient.constraints).toEqual({ deviceId: { exact: 'headset-id' } });
+    expect(lastClient().callClient.constraints).toEqual({ deviceId: 'headset-id' });
   });
 });

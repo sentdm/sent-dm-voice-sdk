@@ -19,6 +19,7 @@ const namespaceTypes = [
   'CancelInfo',
   'Call',
   'CallInvite',
+  'AudioController',
 ];
 
 const runInDist = (format: (typeof formats)[number], body: string): unknown => {
