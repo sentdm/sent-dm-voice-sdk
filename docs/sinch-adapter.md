@@ -205,7 +205,7 @@ Needs the backend relay deployed, a voice-enabled number, two browsers over HTTP
 `sw.js`, and a phone. Record the date, the `CallEndCause` and `details.error` of every call, and add each new
 error to [Error mapping](#error-mapping).
 
-1. Register with a token from `POST /v3/voice/tokens`; allow notifications; confirm `registered`.
+1. Register with a token from `POST /v3/channels/voice/tokens`; allow notifications; confirm `registered`.
 2. App to app, both directions: answer, then hang up from each side.
 3. App to app: decline; caller cancels while ringing; let it ring out.
 4. App to phone: answer; busy; no answer; the phone declines.

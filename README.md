@@ -18,7 +18,7 @@ Mint tokens on your server with your Sent API key, never in the browser, for the
 
 ```ts
 export async function createVoiceToken(identity: string): Promise<string> {
-  const response = await fetch('https://api.sent.dm/v3/voice/tokens', {
+  const response = await fetch('https://api.sent.dm/v3/channels/voice/tokens', {
     method: 'POST',
     headers: { 'x-api-key': process.env['SENT_DM_API_KEY'] ?? '', 'Content-Type': 'application/json' },
     body: JSON.stringify({ identity }),
@@ -29,7 +29,7 @@ export async function createVoiceToken(identity: string): Promise<string> {
 }
 ```
 
-`identity` names the user in calls: letters, digits, `-` and `_`, up to 200 characters. The user is bound to your default voice number unless you pass `number`, one of your voice-enabled numbers, and the token lasts `ttl` seconds (600 by default, at most 3600). Return the token as text from an endpoint of your own, such as `/api/voice-token`.
+`identity` names the user in calls: letters, digits, `-` and `_`, up to 200 characters. The user is bound to your default voice number unless you pass `number`, one of the numbers you turned voice on for with `POST /v3/channels/voice`, and the token lasts `ttl` seconds (600 by default, at most 3600). Return the token as text from an endpoint of your own, such as `/api/voice-token`.
 
 ### 2. Serve the service worker
 
@@ -71,7 +71,7 @@ The first `register()` asks the user to allow notifications, which the browser n
 
 ## Token lifecycle
 
-`tokenProvider` is how the SDK gets every token. It must return the `token` that `POST /v3/voice/tokens` responded with, fetched fresh each time, because the SDK calls it again before each token expires.
+`tokenProvider` is how the SDK gets every token. It must return the `token` that `POST /v3/channels/voice/tokens` responded with, fetched fresh each time, because the SDK calls it again before each token expires.
 
 - `register()` calls it and resolves once the client is `registered`. The client moves from `unregistered` to `registering` to `registered`, emitting each state as an event.
 - A token provider that throws or rejects is retried after a short backoff, 2 more times by default (`registerRetries`); `register()` then rejects with a `NetworkError`. A value that is not a voice token rejects with a `TokenInvalidError` at once.
@@ -100,6 +100,8 @@ client.on('offline', (reason) => console.warn(`Offline (${reason.code}), trying 
 ## Calls
 
 `connect({ to })` calls a phone number in E.164 format, like `'+14155551234'`, or another user of your app by identity, like `'ben'`. `joinConference({ name })` joins one of your account's rooms, named with letters, digits, `-` and `_`, up to 27 characters. Either throws a `SentVoiceError` with code `INVALID_ADDRESS` when `to` or `name` does not fit, and one with code `CALL_IN_PROGRESS` while a call is in progress or an incoming call is still waiting for an answer: the SDK handles one call at a time. Both open the microphone, and reject with a `MediaPermissionError` when the user refuses. `to` says who the user wants to reach; your backend's answer decides what rings.
+
+A leg to a phone number, whether the answer connects the call to a number or a phone participant is added through the API, runs for at most what your account's balance affords at the destination's per-minute rate, capped at four hours by the provider. Legs to app users and rooms have no such limit because they cost nothing. A call that reaches the cap ends as `completed`.
 
 ```ts
 import type SentVoice from '@sentdm/voice';
@@ -316,7 +318,7 @@ The SDK reports usage and call quality data to Sent, authenticated with the voic
 - for each call: its id, direction and outcome, how long it took to connect and how long it lasted, and at its end the average round-trip time, jitter and packet loss of samples taken every 10 seconds
 - the errors the client and its calls report: code, category, whether retriable, the message, and the underlying provider error with its name, message, stack and properties
 
-No audio, phone numbers or identities are added by the SDK; the underlying provider error travels as the provider produced it. Batches go to `https://api.sent.dm/v3/voice/telemetry` 3 seconds after the first event queued, so events that happen together share one request, and at once when a call ends, when the page is hidden and when the client is destroyed. A batch that fails is retried once, with the next batch or within 30 seconds, then dropped, and telemetry never delays a call. Turn it off with `telemetry: { disabled: true }`.
+No audio, phone numbers or identities are added by the SDK; the underlying provider error travels as the provider produced it. Batches go to `https://api.sent.dm/v3/voice/telemetry` 3 seconds after the first event queued, so events that happen together share one request, and at once when a call ends, when the page is hidden and when the client is destroyed. A batch that fails, or that Sent refuses (for example with 404 while the telemetry endpoint is not deployed), is retried once, with the next batch or within 30 seconds, then dropped; telemetry never throws to your app and never delays a call. Turn it off with `telemetry: { disabled: true }`.
 
 ## Browser realities
 

@@ -3,7 +3,7 @@ export const issuer = '//rtc.sinch.com/applications/0bb6f5e2-5ad1-4c3b-8b1b-5a0c
 
 const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
 
-/** A token shaped like the ones `POST /v3/voice/tokens` mints, issued now and valid for 600 s. */
+/** A token shaped like the ones `POST /v3/channels/voice/tokens` mints, issued now and valid for 600 s. */
 export function voiceToken(claims: Record<string, unknown> = {}): string {
   const iat = Math.floor(Date.now() / 1000);
   return [

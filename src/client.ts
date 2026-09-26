@@ -28,7 +28,7 @@ import { VERSION } from './version';
 
 export interface SentVoiceOptions {
   /**
-   * Returns a voice token from your backend, which mints it with `POST /v3/voice/tokens`.
+   * Returns a voice token from your backend, which mints it with `POST /v3/channels/voice/tokens`.
    * Called by `register()` and again before each token expires.
    */
   tokenProvider: () => Promise<string>;
