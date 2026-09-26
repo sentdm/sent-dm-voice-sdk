@@ -197,7 +197,7 @@ describe('React helpers', () => {
     const { rerender } = render(createElement(wrapper));
     await advance(0);
 
-    act(() => void adapter.receiveCall(`${prefix}=carol`));
+    act(() => void adapter.receiveCall(`${prefix}_carol`));
     rerender(createElement(wrapper, null, createElement(Incoming)));
     const first = invite!;
     expect(first).toMatchObject({ state: 'pending', from: { kind: 'user', identity: 'carol' } });
@@ -211,7 +211,7 @@ describe('React helpers', () => {
     await act(() => first.accept());
     expect(invite).toBeNull();
 
-    act(() => void adapter.receiveCall(`${prefix}=dave`, hangsUp));
+    act(() => void adapter.receiveCall(`${prefix}_dave`, hangsUp));
     expect(invite).toMatchObject({ state: 'pending', from: { kind: 'user', identity: 'dave' } });
     await advance(1_000);
     expect(invite).toBeNull();
@@ -265,7 +265,7 @@ describe('React helpers', () => {
     expect(hangup).toHaveBeenCalledWith(placed.id);
     expect(result.current.active).toMatchObject({ call: null, state: null, isMuted: false, duration: 0 });
 
-    act(() => void adapter.receiveCall(`${prefix}=carol`));
+    act(() => void adapter.receiveCall(`${prefix}_carol`));
     const accepted = await act(() => result.current.invite!.accept());
     expect(result.current.active).toMatchObject({ call: accepted, state: 'connected' });
   });

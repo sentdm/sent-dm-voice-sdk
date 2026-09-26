@@ -4,7 +4,14 @@
     {
       "type": "register.failed",
       "occurred_at": "2026-07-22T11:59:59.250Z",
-      "payload": { "duration_ms": 250, "attempt": 1, "code": "UNKNOWN", "category": "signaling" }
+      "payload": {
+        "duration_ms": 250,
+        "attempt": 1,
+        "code": "UNKNOWN",
+        "category": "signaling",
+        "retriable": false,
+        "message": "An unexpected calling error occurred."
+      }
     },
     {
       "type": "register.completed",
@@ -32,7 +39,12 @@
       "type": "client.error",
       "call_id": "mock-call-1",
       "occurred_at": "2026-07-22T12:00:02.000Z",
-      "payload": { "code": "MEDIA_PERMISSION_DENIED", "category": "media" }
+      "payload": {
+        "code": "MEDIA_PERMISSION_DENIED",
+        "category": "media",
+        "retriable": false,
+        "message": "Microphone permission was denied."
+      }
     },
     {
       "type": "call.connected",

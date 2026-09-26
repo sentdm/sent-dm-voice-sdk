@@ -15,7 +15,15 @@ import { TypedEmitter } from './events';
 import { CallInvite, type CancelInfo } from './invite';
 import { createLog, parseLogLevel, type Log, type Logger, type LogLevel } from './log';
 import { Telemetry } from './telemetry';
-import { fetchToken, offlineRetryDelay, refreshDelay, retryDelay, type VoiceToken } from './token';
+import {
+  fetchToken,
+  offlineRetryDelay,
+  qualify,
+  refreshDelay,
+  retryDelay,
+  unqualify,
+  type VoiceToken,
+} from './token';
 import { VERSION } from './version';
 
 export interface SentVoiceOptions {
@@ -229,7 +237,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
       );
     }
     return this.#place({ kind: 'user', identity: to }, (adapter, prefix) =>
-      adapter.call({ kind: 'user', id: `${prefix}=${to}` }),
+      adapter.call({ kind: 'user', id: qualify(prefix, to) }),
     );
   }
 
@@ -241,7 +249,7 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
       );
     }
     return this.#place({ kind: 'conference', name }, (adapter, prefix) =>
-      adapter.joinConference(`${prefix}=${name}`),
+      adapter.joinConference(qualify(prefix, name)),
     );
   }
 
@@ -401,11 +409,9 @@ export class SentVoice extends TypedEmitter<SentVoiceEvents> {
     const token = this.#token;
     if (!token) return;
 
-    const separator = from.indexOf('=');
+    const identity = unqualify(token.prefix, from);
     const caller: Address =
-      separator < 0 ?
-        { kind: 'number', number: from }
-      : { kind: 'user', identity: from.slice(separator + 1) };
+      identity === undefined ? { kind: 'number', number: from } : { kind: 'user', identity };
     const call = this.#createCall(adapter, callId, 'inbound', caller, {
       kind: 'user',
       identity: token.identity,

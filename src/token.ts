@@ -9,6 +9,26 @@ export interface VoiceToken {
   expiresAt: number;
 }
 
+/**
+ * A provider-side id is `{prefix}_{name}`: the account's id, one underscore, the bare name. Readers
+ * split on the first `_`: an account id never contains one while names may, so the prefix is opaque
+ * here and nothing depends on its length or shape. The separator used to be `=`, which the calling
+ * provider's library percent-encodes and then signs a second time, so every signed request was
+ * refused; letters, digits, `-` and `_` are never encoded.
+ */
+const separator = '_';
+
+/** The id the provider knows a user or room by. */
+export const qualify = (prefix: string, name: string): string => `${prefix}${separator}${name}`;
+
+/** The bare name behind one of this account's ids, or undefined when the id is not one of ours. */
+export function unqualify(prefix: string, qualified: string): string | undefined {
+  const head = `${prefix}${separator}`;
+  return qualified.length > head.length && qualified.startsWith(head) ?
+      qualified.slice(head.length)
+    : undefined;
+}
+
 const refreshShare = 0.8;
 const refreshMargin = 30_000;
 const initialRetryDelay = 500;
@@ -34,7 +54,9 @@ export function decodeToken(jwt: unknown): VoiceToken {
     typeof iss === 'string' && typeof sub === 'string' && sub.startsWith(users) ?
       sub.slice(users.length)
     : '';
-  const separator = userId.indexOf('=');
+  const separatorAt = userId.indexOf(separator);
+  const prefix = separatorAt > 0 ? userId.slice(0, separatorAt) : '';
+  const identity = separatorAt > 0 ? userId.slice(separatorAt + 1) : '';
 
   if (
     typeof iat !== 'number' ||
@@ -42,16 +64,16 @@ export function decodeToken(jwt: unknown): VoiceToken {
     exp <= iat ||
     typeof number !== 'string' ||
     !number ||
-    separator < 1 ||
-    separator === userId.length - 1
+    !prefix ||
+    !identity
   ) {
     throw new TokenInvalidError();
   }
 
   return {
     jwt,
-    prefix: userId.slice(0, separator),
-    identity: userId.slice(separator + 1),
+    prefix,
+    identity,
     number,
     issuedAt: iat * 1000,
     expiresAt: exp * 1000,

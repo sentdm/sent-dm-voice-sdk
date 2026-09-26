@@ -67,7 +67,18 @@ const chromeOnMac =
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
 const accepted = { ok: true, status: 202 } as Response;
 const fetchFailure = new TypeError('Failed to fetch');
-const unmapped = new SentVoiceError({ code: 'UNKNOWN', category: 'signaling', retriable: false });
+const unmapped = new SentVoiceError({
+  code: 'UNKNOWN',
+  category: 'signaling',
+  retriable: false,
+  message: 'An unexpected calling error occurred.',
+});
+const tokenFailure = {
+  code: 'NETWORK',
+  category: 'network',
+  retriable: true,
+  message: 'The token provider failed to fetch a voice token.',
+};
 
 const setGlobal = (name: string, value: unknown) =>
   Object.defineProperty(globalThis, name, { configurable: true, value });
@@ -105,7 +116,7 @@ describe('telemetry', () => {
     jest.restoreAllMocks();
   });
 
-  test('a session sends the shared fixture batch byte for byte when its call ends', async () => {
+  test('a session sends the shared fixture events byte for byte, in batches 3 s after an event and at once when its call ends', async () => {
     jest.setSystemTime(now - 1_000);
     jest
       .spyOn(adapter, 'register')
@@ -128,17 +139,23 @@ describe('telemetry', () => {
     await jest.advanceTimersByTimeAsync(412);
     await registered;
     await jest.advanceTimersByTimeAsync(1_000);
-    adapter.receiveCall(`${prefix}=ben`);
+    adapter.receiveCall(`${prefix}_ben`);
     await jest.advanceTimersByTimeAsync(1_000);
     await expect(invite.accept()).rejects.toBeInstanceOf(MediaPermissionError);
     await jest.advanceTimersByTimeAsync(1_000);
     const call = await invite.accept();
     await jest.advanceTimersByTimeAsync(26_000);
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     await call.disconnect();
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]![1].body).toBe(JSON.stringify(fixture));
+    // The registration and the call's start left 3 s after the registration, the connect 3 s after
+    // itself, and the call's end at once. Concatenated, the batches are the fixture.
+    const body = (events: unknown[]) => JSON.stringify({ sdk_version: fixture.sdk_version, events });
+    expect(fetchMock.mock.calls.map(([, init]) => init.body)).toEqual([
+      body(fixture.events.slice(0, 5)),
+      body(fixture.events.slice(5, 6)),
+      body(fixture.events.slice(6)),
+    ]);
   });
 
   test.each<[string, SentVoiceOptions['telemetry'], string]>([
@@ -148,26 +165,29 @@ describe('telemetry', () => {
       { baseURL: 'https://staging.example/' },
       'https://staging.example/v3/voice/telemetry',
     ],
-  ])('queued events go to %s every 30 s with the voice token as bearer', async (_, telemetry, url) => {
-    const jwt = voiceToken();
-    tokenProvider.mockResolvedValueOnce(jwt);
-    const client = createClient({ telemetry });
-    await client.register();
+  ])(
+    'queued events go to %s 3 s after the first, with the voice token as bearer',
+    async (_, telemetry, url) => {
+      const jwt = voiceToken();
+      tokenProvider.mockResolvedValueOnce(jwt);
+      const client = createClient({ telemetry });
+      await client.register();
 
-    await jest.advanceTimersByTimeAsync(29_999);
-    expect(fetchMock).not.toHaveBeenCalled();
-    await jest.advanceTimersByTimeAsync(1);
+      await jest.advanceTimersByTimeAsync(2_999);
+      expect(fetchMock).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(1);
 
-    expect(fetchMock).toHaveBeenCalledWith(url, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' },
-      body: expect.any(String),
-      keepalive: false,
-    });
-    expect(sent().map(({ type }) => type)).toEqual(['register.completed', 'client.info']);
-    await jest.advanceTimersByTimeAsync(30_000);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-  });
+      expect(fetchMock).toHaveBeenCalledWith(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' },
+        body: expect.any(String),
+        keepalive: false,
+      });
+      expect(sent().map(({ type }) => type)).toEqual(['register.completed', 'client.info']);
+      await jest.advanceTimersByTimeAsync(30_000);
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    },
+  );
 
   test.each<[string, () => void]>([
     [
@@ -192,6 +212,8 @@ describe('telemetry', () => {
       headers: { 'Content-Type': 'application/json' },
     });
     expect(sent().map(({ type }) => type)).toEqual(['register.completed', 'client.info']);
+    await jest.advanceTimersByTimeAsync(3_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   test('register() outcomes carry their duration and attempts, and nothing leaves before the first registration', async () => {
@@ -212,10 +234,10 @@ describe('telemetry', () => {
     const registered = client.register();
     await jest.advanceTimersByTimeAsync(500);
     await registered;
-    await jest.advanceTimersByTimeAsync(30_000);
+    await jest.advanceTimersByTimeAsync(3_000);
 
     expect(sent().map(({ type, payload }) => [type, payload])).toEqual([
-      ['register.failed', { duration_ms: 1_500, attempt: 3, code: 'NETWORK', category: 'network' }],
+      ['register.failed', { duration_ms: 1_500, attempt: 3, ...tokenFailure }],
       ['register.completed', { duration_ms: 500, attempt: 2 }],
       ['client.info', expect.any(Object)],
     ]);
@@ -231,12 +253,16 @@ describe('telemetry', () => {
     ]);
     await client.connect({ to: 'ben' });
     await jest.advanceTimersByTimeAsync(8_000);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const closing = () =>
+      batches()
+        .slice(-1)[0]!
+        .events.map(({ type }) => type);
+    expect(closing()).toEqual(['call.ended']);
     adapter.scriptNextCall([{ type: 'ringing' }, { type: 'ended', reason: 'busy', after: 4_000 }]);
     await client.connect({ to: '+38349123456' });
     await jest.advanceTimersByTimeAsync(4_000);
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(closing()).toEqual(['call.ended']);
     expect(sent().map(({ type, call_id, payload }) => [type, call_id, payload])).toEqual([
       ['register.completed', undefined, expect.any(Object)],
       ['client.info', undefined, expect.any(Object)],
@@ -248,7 +274,7 @@ describe('telemetry', () => {
     ]);
   });
 
-  test('client.error reports error events and provider failures by code and category, not app mistakes', async () => {
+  test('client.error reports error events and provider failures with their code, category, retriable flag and message, not app mistakes', async () => {
     const client = createClient({ registerRetries: 0 });
     await client.register();
     adapter.failNext('call', unmapped);
@@ -267,10 +293,109 @@ describe('telemetry', () => {
         .filter(({ type }) => type === 'client.error')
         .map(({ call_id, payload }) => [call_id, payload]),
     ).toEqual([
-      [undefined, { code: 'UNKNOWN', category: 'signaling' }],
-      ['mock-call-1', { code: 'CALL_FAILED', category: 'signaling' }],
-      [undefined, { code: 'NETWORK', category: 'network' }],
+      [undefined, { code: 'UNKNOWN', category: 'signaling', retriable: false, message: unmapped.message }],
+      [
+        'mock-call-1',
+        { code: 'CALL_FAILED', category: 'signaling', retriable: false, message: 'The call failed.' },
+      ],
+      [undefined, tokenFailure],
     ]);
+  });
+
+  test('client.error describes the provider error behind a failure whole, with its long strings capped', async () => {
+    class ProviderError extends Error {
+      code = 500;
+      domain = 6;
+      isFatal = false;
+      reason = 'r'.repeat(600);
+      details = { attempt: 2 };
+      circular: unknown;
+      retry = () => {};
+      constructor(message: string) {
+        super(message);
+        this.name = 'ProviderError';
+        this.circular = this;
+      }
+    }
+    const failure = new ProviderError('Unable to connect call');
+    failure.stack = `ProviderError: Unable to connect call\n${'    at frame\n'.repeat(400)}`;
+    const loadFailure = Object.assign(new Error('The calling provider could not be loaded.'), {
+      cause: Object.assign(new TypeError('Failed to fetch'), { cause: new Error('deeper') }),
+    });
+    const client = createClient();
+    await client.register();
+    for (const providerDetail of [
+      failure,
+      loadFailure,
+      'refused',
+      { status: 500, body: { reason: 'busy' } },
+    ]) {
+      adapter.failNext('call', new CallFailedError({ providerDetail }));
+      await expect(client.connect({ to: 'ben' })).rejects.toBeInstanceOf(CallFailedError);
+    }
+    await jest.advanceTimersByTimeAsync(3_000);
+
+    expect(
+      sent()
+        .filter(({ type }) => type === 'client.error')
+        .map(({ payload }) => payload['provider_error']),
+    ).toEqual([
+      {
+        name: 'ProviderError',
+        message: 'Unable to connect call',
+        stack: `${failure.stack.slice(0, 2_000)}…`,
+        code: 500,
+        domain: 6,
+        isFatal: false,
+        reason: `${'r'.repeat(500)}…`,
+        details: { attempt: 2 },
+        circular: 'ProviderError: Unable to connect call',
+      },
+      {
+        name: 'Error',
+        message: 'The calling provider could not be loaded.',
+        stack: expect.stringContaining('Error: The calling provider could not be loaded.'),
+        cause: {
+          name: 'TypeError',
+          message: 'Failed to fetch',
+          stack: expect.stringContaining('TypeError: Failed to fetch'),
+          cause: 'Error: deeper',
+        },
+      },
+      { message: 'refused' },
+      { status: 500, body: { reason: 'busy' } },
+    ]);
+  });
+
+  test('a flush leaves in several requests when one body would exceed what the Sent API accepts', async () => {
+    const client = createClient();
+    await client.register();
+    await jest.advanceTimersByTimeAsync(3_000);
+    const stack = `Error: refused\n${'    at frame\n'.repeat(200)}`;
+    for (let failure = 0; failure < 40; failure++) {
+      adapter.failNext(
+        'call',
+        new CallFailedError({ providerDetail: Object.assign(new Error('refused'), { stack }) }),
+      );
+      await expect(client.connect({ to: 'ben' })).rejects.toBeInstanceOf(CallFailedError);
+    }
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await jest.advanceTimersByTimeAsync(3_000);
+
+    const bodies = fetchMock.mock.calls.slice(1).map(([, init]) => init.body as string);
+    expect(bodies.length).toBeGreaterThan(1);
+    for (const body of bodies) expect(new TextEncoder().encode(body).length).toBeLessThan(64 * 1024);
+    expect(
+      batches()
+        .slice(1)
+        .every(({ sdk_version }) => sdk_version === '0.1.0'),
+    ).toBe(true);
+    expect(
+      sent()
+        .slice(2)
+        .map(({ type }) => type),
+    ).toEqual(Array<string>(40).fill('client.error'));
   });
 
   test('client.info leaves out what the user agent does not tell, and never sends the user agent itself', async () => {
@@ -327,7 +452,7 @@ describe('telemetry', () => {
       client.on('error', errors);
       await client.register();
 
-      await jest.advanceTimersByTimeAsync(30_000);
+      await jest.advanceTimersByTimeAsync(3_000);
       adapter.failNext('call', unmapped);
       await expect(client.connect({ to: 'ben' })).rejects.toBe(unmapped);
       await jest.advanceTimersByTimeAsync(300_000);
@@ -393,7 +518,7 @@ describe('telemetry', () => {
     ]);
   });
 
-  test('destroy drops what is queued and stops sending, sampling and listening, whether its calls end at once or later', async () => {
+  test('destroy stops sending, sampling and listening, whether its calls end at once or later', async () => {
     const addWindowListener = jest.spyOn(window, 'addEventListener');
     const removeWindowListener = jest.spyOn(window, 'removeEventListener');
     const addPageListener = jest.spyOn(page, 'addEventListener');
@@ -404,22 +529,38 @@ describe('telemetry', () => {
     client.on('incomingCall', (received) => (invite = received));
     adapter.scriptNextCall([{ type: 'connected' }]);
     await client.connect({ to: 'ben' });
-    adapter.receiveCall(`${prefix}=carol`);
+    adapter.receiveCall(`${prefix}_carol`);
     await invite.accept();
     const getStats = jest.spyOn(adapter, 'getStats');
     jest.spyOn(adapter, 'hangup').mockResolvedValueOnce();
     await jest.advanceTimersByTimeAsync(10_000);
     expect(getStats).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
 
     await client.destroy();
     window.dispatchEvent(new Event('pagehide'));
     await jest.advanceTimersByTimeAsync(600_000);
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(getStats).toHaveBeenCalledTimes(2);
     expect(jest.getTimerCount()).toBe(0);
     expect(removeWindowListener.mock.calls).toEqual(addWindowListener.mock.calls);
     expect(removePageListener.mock.calls).toEqual(addPageListener.mock.calls);
+  });
+
+  test('destroy sends what is queued in a keepalive request, so a session ended by navigation is reported', async () => {
+    const client = createClient();
+    await client.register();
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    await client.destroy();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![1]).toMatchObject({ keepalive: true });
+    expect(sent().map(({ type }) => type)).toEqual(['register.completed', 'client.info']);
+    await jest.advanceTimersByTimeAsync(600_000);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(jest.getTimerCount()).toBe(0);
   });
 
   test('with telemetry disabled nothing is sent, sampled, listened to or scheduled', async () => {
@@ -483,7 +624,7 @@ describe('telemetry', () => {
       placed.sendDigits('1');
       void placed.disconnect().then(() => note('disconnect resolved'));
       await jest.advanceTimersByTimeAsync(0);
-      timed.receiveCall(`${prefix}=carol`);
+      timed.receiveCall(`${prefix}_carol`);
       await jest.advanceTimersByTimeAsync(15_000);
       void client.activeCall!.disconnect().then(() => note('incoming disconnect resolved'));
       await jest.advanceTimersByTimeAsync(0);

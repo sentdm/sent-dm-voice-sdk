@@ -2,6 +2,7 @@
 import type { Call, CallClient, CallListener, CallQualityWarningEvent, SinchClient } from 'sinch-rtc';
 import type { CallStats } from '../call';
 import {
+  CallFailedError,
   CapabilityUnsupportedError,
   MediaPermissionError,
   NetworkError,
@@ -35,6 +36,25 @@ const providerError = (error: unknown): SentVoiceError =>
       providerDetail: error,
     })
   );
+
+// The Sinch backend refuses a call it cannot set up with `Unable to connect call (<reason>)`, an HTTP
+// failure whose only discriminator is that text. The caller gets a stable code and Sent's wording; the
+// provider's reason is kept as provider detail, for telemetry.
+const setupRefusal = /^Unable to connect call(?: \((.+)\))?/;
+const setupRefusalMessages: Record<string, string> = {
+  'destination user not found': 'The destination is not registered.',
+};
+
+const callSetupError = (error: { message: string }): SentVoiceError | undefined => {
+  const match = setupRefusal.exec(error.message);
+  if (!match) return undefined;
+  const reason = match[1];
+  const message = reason === undefined ? undefined : setupRefusalMessages[reason];
+  return new CallFailedError({
+    message: message ?? 'The call could not be connected.',
+    providerDetail: error,
+  });
+};
 
 const rethrow = (error: unknown): never => {
   throw providerError(error);
@@ -284,7 +304,7 @@ class SinchAdapter implements ProviderAdapter {
           error:
             error.domain === ErrorType.Network ?
               new NetworkError({ providerDetail: error })
-            : providerError(error),
+            : (callSetupError(error) ?? providerError(error)),
         };
       default:
         return { callId, type: 'ended', reason: 'completed' };

@@ -10,7 +10,7 @@ export function voiceToken(claims: Record<string, unknown> = {}): string {
     encode({ alg: 'HS256', typ: 'JWT', kid: 'hkdfv1-20260922' }),
     encode({
       iss: issuer,
-      sub: `${issuer}/users/${prefix}=agent-42`,
+      sub: `${issuer}/users/${prefix}_agent-42`,
       iat,
       exp: iat + 600,
       nonce: '9f86d081884c7d659a2feaa0c55ad015',

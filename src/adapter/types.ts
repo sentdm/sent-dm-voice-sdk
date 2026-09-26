@@ -10,7 +10,7 @@ import type { SentVoiceError } from '../errors';
  *   incoming `from` values are already namespaced.
  * - `register` while registered hands the provider a fresh token.
  * - Every failure is a `SentVoiceError`. A provider error without a mapping becomes one with code
- *   `UNKNOWN`, category `signaling` and the raw error in `providerDetail`.
+ *   `UNKNOWN`, category `signaling` and the raw error kept as provider detail, which only telemetry reads.
  * - Calls are identified by the provider call id. Their events start once the id is known from
  *   `call`, `joinConference` or `onIncoming`, and `ended` is the last event of every call,
  *   including one ended by `reject` or `hangup`.

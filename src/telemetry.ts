@@ -3,6 +3,7 @@ import Bowser from 'bowser';
 import type { Call, CallStats } from './call';
 import { SentVoiceError } from './errors';
 import type { Log } from './log';
+import { providerDetailOf } from './provider-detail';
 import { VERSION } from './version';
 
 type EventType =
@@ -15,6 +16,14 @@ type EventType =
   | 'call.connected'
   | 'call.quality'
   | 'call.ended';
+
+type ProviderError = {
+  name?: string;
+  message?: string;
+  stack?: string;
+  cause?: unknown;
+  [property: string]: unknown;
+};
 
 type Payload = Partial<
   Record<
@@ -32,9 +41,10 @@ type Payload = Partial<
     | 'packet_loss'
     | 'samples'
     | 'code'
-    | 'category',
+    | 'category'
+    | 'message',
     string | number
-  >
+  > & { retriable: boolean; provider_error: ProviderError }
 >;
 
 interface Entry {
@@ -44,9 +54,20 @@ interface Entry {
 
 const defaultBaseURL = 'https://api.sent.dm';
 const path = '/v3/voice/telemetry';
+// A batch leaves this long after the first event queued for it, so events that happen together (a
+// registration and its client.info, a call's start and its connect) share one request. Sent allows 30
+// telemetry requests per identity per minute; this delay keeps even a busy client under 20.
+const flushDelay = 3_000;
+// A failed batch is retried with the next batch or, if nothing else happens, when this timer fires.
 const flushInterval = 30_000;
 const sampleInterval = 10_000;
 const maxEvents = 100;
+// The Sent API refuses a body over 64 KiB. Error events carry the provider's error, so a backlog of them
+// leaves in as many requests as it takes to keep each body under that.
+const maxBodyBytes = 60_000;
+// A provider error's strings are capped, the stack more generously than the rest.
+const maxStackLength = 2_000;
+const maxTextLength = 500;
 
 function clientInfo(userAgent: string): Payload {
   const { browser, os, platform } = Bowser.parse(userAgent);
@@ -63,12 +84,106 @@ function clientInfo(userAgent: string): Payload {
 const average = (samples: CallStats[], metric: keyof CallStats) =>
   samples.reduce((sum, sample) => sum + sample[metric], 0) / samples.length;
 
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max)}…` : text);
+
+// A JSON-safe copy of one property of a provider error. An error travels as its text, an object as it
+// serializes, or as its clipped JSON text when that is too long; a value that cannot serialize travels as
+// its text.
+const plain = (value: unknown): unknown => {
+  switch (typeof value) {
+    case 'string':
+      return clip(value, maxTextLength);
+    case 'number':
+    case 'boolean':
+      return value;
+    case 'object': {
+      if (value === null) return null;
+      if (value instanceof Error) return clip(String(value), maxTextLength);
+      let json: string | undefined;
+      try {
+        json = JSON.stringify(value) as string | undefined;
+      } catch {
+        return String(value);
+      }
+      if (json === undefined) return undefined;
+      return json.length > maxTextLength ? clip(json, maxTextLength) : (JSON.parse(json) as unknown);
+    }
+    default:
+      return undefined;
+  }
+};
+
+// The provider's error described whole: its name, message, stack and cause, then every own property,
+// such as a Sinch error's code, domain and isFatal. The cause is described the same way, and its own
+// cause by its text. A value that is not an object is described by its text.
+const describeProviderError = (detail: unknown, nested = false): ProviderError | undefined => {
+  if (detail === undefined || detail === null) return undefined;
+  if (typeof detail !== 'object') return { message: clip(String(detail), maxTextLength) };
+  const described: ProviderError = {};
+  if (detail instanceof Error) {
+    described.name = detail.name;
+    described.message = clip(detail.message, maxTextLength);
+    if (detail.stack) described.stack = clip(detail.stack, maxStackLength);
+    const { cause } = detail as { cause?: unknown };
+    if (cause !== undefined && cause !== null) {
+      described.cause = nested ? plain(cause) : describeProviderError(cause, true);
+    }
+  }
+  for (const [key, value] of Object.entries(detail)) {
+    if (key in described) continue;
+    const copy = plain(value);
+    if (copy !== undefined) described[key] = copy;
+  }
+  return described;
+};
+
+// What every error event carries: Sent's code, category, retriable flag and message, and the provider
+// error behind it, which apps cannot read from the error.
+const errorFields = (error: SentVoiceError): Payload => {
+  const fields: Payload = {
+    code: error.code,
+    category: error.category,
+    retriable: error.retriable,
+    message: error.message,
+  };
+  const providerError = describeProviderError(providerDetailOf(error));
+  if (providerError) fields.provider_error = providerError;
+  return fields;
+};
+
+const body = (entries: Entry[]) =>
+  JSON.stringify({ sdk_version: VERSION, events: entries.map(({ event }) => event) });
+
+const byteLength = (text: string) => new TextEncoder().encode(text).length;
+
+// The entries in order, cut into batches whose bodies stay under the cap. One over the cap by itself is
+// sent alone.
+const split = (entries: Entry[]): Entry[][] => {
+  const overhead = byteLength(body([]));
+  const batches: Entry[][] = [];
+  let batch: Entry[] = [];
+  let size = overhead;
+  for (const entry of entries) {
+    const entrySize = byteLength(JSON.stringify(entry.event)) + 1;
+    if (batch.length && size + entrySize > maxBodyBytes) {
+      batches.push(batch);
+      batch = [];
+      size = overhead;
+    }
+    batch.push(entry);
+    size += entrySize;
+  }
+  if (batch.length) batches.push(batch);
+  return batches;
+};
+
 export class Telemetry {
   #url: string;
   #log: Log;
   #token: string | undefined;
   #queue: Entry[] = [];
   #timer: ReturnType<typeof setInterval> | undefined;
+  #pending: ReturnType<typeof setTimeout> | undefined;
   #sampling = new Set<ReturnType<typeof setInterval>>();
   #pageHide = () => this.#flush(true);
   #visibilityChange = () => {
@@ -83,6 +198,8 @@ export class Telemetry {
 
   useToken(jwt: string): void {
     this.#token = jwt;
+    // Events recorded before the first token, such as a failed attempt and the registration itself.
+    if (this.#queue.length) this.#schedule();
     if (this.#timer) return;
     this.#timer = setInterval(() => this.#flush(), flushInterval);
     window.addEventListener('pagehide', this.#pageHide);
@@ -98,7 +215,7 @@ export class Telemetry {
     this.#record(
       'register.failed',
       error instanceof SentVoiceError ?
-        { duration_ms: duration, attempt: attempts, code: error.code, category: error.category }
+        { duration_ms: duration, attempt: attempts, ...errorFields(error) }
       : { duration_ms: duration, attempt: attempts },
     );
   }
@@ -108,9 +225,7 @@ export class Telemetry {
   }
 
   error(error: unknown, callId?: string): void {
-    if (error instanceof SentVoiceError) {
-      this.#record('client.error', { code: error.code, category: error.category }, callId);
-    }
+    if (error instanceof SentVoiceError) this.#record('client.error', errorFields(error), callId);
   }
 
   callStarted(call: Call): void {
@@ -162,6 +277,9 @@ export class Telemetry {
   }
 
   destroyed(): void {
+    // Whatever is queued leaves now, in a request that outlives the page if the client goes with it.
+    // Dropping it lost every session that ended by navigation before its first batch was due.
+    this.#flush(true);
     this.#token = undefined;
     this.#queue = [];
     for (const sampling of this.#sampling) clearInterval(sampling);
@@ -178,14 +296,27 @@ export class Telemetry {
         { type, occurred_at: occurredAt, payload }
       : { type, call_id: callId, occurred_at: occurredAt, payload };
     this.#queue = [...this.#queue, { event, retried: false }].slice(-maxEvents);
+    this.#schedule();
+  }
+
+  #schedule(): void {
+    if (!this.#token || this.#pending) return;
+    this.#pending = setTimeout(() => {
+      this.#pending = undefined;
+      this.#flush();
+    }, flushDelay);
   }
 
   #flush(keepalive = false): void {
+    if (this.#pending) {
+      clearTimeout(this.#pending);
+      this.#pending = undefined;
+    }
     const token = this.#token;
     if (!token || !this.#queue.length) return;
     const entries = this.#queue;
     this.#queue = [];
-    void this.#send(token, entries, keepalive);
+    for (const batch of split(entries)) void this.#send(token, batch, keepalive);
   }
 
   async #send(token: string, entries: Entry[], keepalive: boolean): Promise<void> {
@@ -193,7 +324,7 @@ export class Telemetry {
       const response = await fetch(this.#url, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sdk_version: VERSION, events: entries.map(({ event }) => event) }),
+        body: body(entries),
         keepalive,
       });
       if (response.ok) return;
@@ -202,6 +333,8 @@ export class Telemetry {
       this.#log.debug(`Sending telemetry failed: ${error}`);
     }
 
+    // Retried with the next batch, or with the interval if nothing else happens; never after destroy.
+    if (this.#token === undefined) return;
     const retries = entries.filter(({ retried }) => !retried).map(({ event }) => ({ event, retried: true }));
     this.#queue = [...retries, ...this.#queue].slice(-maxEvents);
   }

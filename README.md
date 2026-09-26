@@ -187,21 +187,21 @@ export async function answer(invite: SentVoice.CallInvite) {
 }
 ```
 
-| Error                        | `code`                    | `category`   | When                                                                                                                                     |
-| ---------------------------- | ------------------------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `TokenInvalidError`          | `TOKEN_INVALID`           | `auth`       | `register()`: the token provider returned something that is not a voice token                                                            |
-| `TokenExpiredError`          | `TOKEN_EXPIRED`           | `auth`       | the `offline` event: the token could not be refreshed                                                                                    |
-| `NotRegisteredError`         | `NOT_REGISTERED`          | `validation` | `connect()` or `joinConference()` while not registered; registering, calling or choosing a device after `destroy()`                      |
-| `MediaPermissionError`       | `MEDIA_PERMISSION_DENIED` | `media`      | `connect()`, `joinConference()` or `accept()`: the microphone could not be opened                                                        |
-| `CallFailedError`            | `CALL_FAILED`             | `signaling`  | `accept()` on a call that ended before it was answered                                                                                   |
-| `CallRejectedError`          | `CALL_REJECTED`           | `signaling`  | not raised yet: a call the other side declines ends as `busy`                                                                            |
-| `NetworkError`               | `NETWORK`                 | `network`    | `register()`, when the token provider keeps failing or the calling provider cannot be loaded; a call whose connection failed or was lost |
-| `CapabilityUnsupportedError` | `CAPABILITY_UNSUPPORTED`  | `capability` | `setOutputDevice()` where the browser cannot choose the speaker; listing devices over plain HTTP                                         |
-| `SentVoiceError`             | `INVALID_ADDRESS`         | `validation` | `connect()` or `joinConference()` with a `to` or `name` that does not fit                                                                |
-| `SentVoiceError`             | `CALL_IN_PROGRESS`        | `validation` | `connect()` or `joinConference()` while a call is in progress or an incoming call is waiting for an answer                               |
-| `SentVoiceError`             | `UNKNOWN`                 | `signaling`  | anything else, such as `register()` failing because notifications are blocked                                                            |
+| Error                        | `code`                    | `category`   | When                                                                                                                                                                  |
+| ---------------------------- | ------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `TokenInvalidError`          | `TOKEN_INVALID`           | `auth`       | `register()`: the token provider returned something that is not a voice token                                                                                         |
+| `TokenExpiredError`          | `TOKEN_EXPIRED`           | `auth`       | the `offline` event: the token could not be refreshed                                                                                                                 |
+| `NotRegisteredError`         | `NOT_REGISTERED`          | `validation` | `connect()` or `joinConference()` while not registered; registering, calling or choosing a device after `destroy()`                                                   |
+| `MediaPermissionError`       | `MEDIA_PERMISSION_DENIED` | `media`      | `connect()`, `joinConference()` or `accept()`: the microphone could not be opened                                                                                     |
+| `CallFailedError`            | `CALL_FAILED`             | `signaling`  | `accept()` on a call that ended before it was answered; a call the provider could not set up, such as to an identity that is not registered, ends as `failed` with it |
+| `CallRejectedError`          | `CALL_REJECTED`           | `signaling`  | not raised yet: a call the other side declines ends as `busy`                                                                                                         |
+| `NetworkError`               | `NETWORK`                 | `network`    | `register()`, when the token provider keeps failing or the calling provider cannot be loaded; a call whose connection failed or was lost                              |
+| `CapabilityUnsupportedError` | `CAPABILITY_UNSUPPORTED`  | `capability` | `setOutputDevice()` where the browser cannot choose the speaker; listing devices over plain HTTP                                                                      |
+| `SentVoiceError`             | `INVALID_ADDRESS`         | `validation` | `connect()` or `joinConference()` with a `to` or `name` that does not fit                                                                                             |
+| `SentVoiceError`             | `CALL_IN_PROGRESS`        | `validation` | `connect()` or `joinConference()` while a call is in progress or an incoming call is waiting for an answer                                                            |
+| `SentVoiceError`             | `UNKNOWN`                 | `signaling`  | anything else, such as `register()` failing because notifications are blocked                                                                                         |
 
-Errors that happen outside a method call arrive as events: the client's `error` when a token refresh fails, and a call's `error`, followed by `disconnected` with `{ state: 'failed', error }`. `providerDetail` keeps the underlying error, for your logs only.
+Errors that happen outside a method call arrive as events: the client's `error` when a token refresh fails, and a call's `error`, followed by `disconnected` with `{ state: 'failed', error }`. The underlying provider error is not exposed on the error; the SDK reports it to Sent as telemetry.
 
 ## Devices
 
@@ -312,11 +312,11 @@ function Phone() {
 The SDK reports usage and call quality data to Sent, authenticated with the voice token:
 
 - the SDK version, and the browser, its major version, the operating system, its version and the device type, as read from the user agent (the user agent itself is not sent)
-- how long `register()` took, its attempts and, when it failed, the error code and category; how long `unregister()` took
+- how long `register()` took, its attempts and, when it failed, its error; how long `unregister()` took
 - for each call: its id, direction and outcome, how long it took to connect and how long it lasted, and at its end the average round-trip time, jitter and packet loss of samples taken every 10 seconds
-- the code and category of the errors the client and its calls report
+- the errors the client and its calls report: code, category, whether retriable, the message, and the underlying provider error with its name, message, stack and properties
 
-No audio, phone numbers or identities are included. Batches go to `https://api.sent.dm/v3/voice/telemetry` every 30 seconds, when a call ends and when the page is hidden. A batch that fails is retried once, then dropped, and telemetry never delays a call. Turn it off with `telemetry: { disabled: true }`.
+No audio, phone numbers or identities are added by the SDK; the underlying provider error travels as the provider produced it. Batches go to `https://api.sent.dm/v3/voice/telemetry` 3 seconds after the first event queued, so events that happen together share one request, and at once when a call ends, when the page is hidden and when the client is destroyed. A batch that fails is retried once, with the next batch or within 30 seconds, then dropped, and telemetry never delays a call. Turn it off with `telemetry: { disabled: true }`.
 
 ## Browser realities
 

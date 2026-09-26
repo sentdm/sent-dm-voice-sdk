@@ -38,7 +38,7 @@ describe('CallInvite', () => {
   });
 
   test.each<[string, SentVoice.Address]>([
-    [`${prefix}=ben`, { kind: 'user', identity: 'ben' }],
+    [`${prefix}_ben`, { kind: 'user', identity: 'ben' }],
     ['+38344555666', { kind: 'number', number: '+38344555666' }],
   ])('a call from %s arrives as a pending invite addressed to this identity', (from, caller) => {
     const { invite } = receiveCall(from);
@@ -52,7 +52,7 @@ describe('CallInvite', () => {
   });
 
   test('accept answers once and resolves with the call, ringing until the provider reports it answered', async () => {
-    const { callId, invite } = receiveCall(`${prefix}=ben`);
+    const { callId, invite } = receiveCall(`${prefix}_ben`);
     const answer = jest.spyOn(adapter, 'answer').mockResolvedValueOnce(undefined);
     const reject = jest.spyOn(adapter, 'reject');
     const accepted = jest.fn();
@@ -78,7 +78,7 @@ describe('CallInvite', () => {
   });
 
   test('a refused microphone rejects accept with MediaPermissionError and leaves the invite pending', async () => {
-    const { invite } = receiveCall(`${prefix}=ben`);
+    const { invite } = receiveCall(`${prefix}_ben`);
     const refused = new MediaPermissionError();
     adapter.failNext('answer', refused);
 
@@ -91,7 +91,7 @@ describe('CallInvite', () => {
   });
 
   test('reject declines a pending call with a rejected event and no cancelled event', async () => {
-    const { callId, invite } = receiveCall(`${prefix}=ben`);
+    const { callId, invite } = receiveCall(`${prefix}_ben`);
     const reject = jest.spyOn(adapter, 'reject');
     const rejected = jest.fn();
     const cancelled = jest.fn();
@@ -107,7 +107,7 @@ describe('CallInvite', () => {
   });
 
   test('reject ends rejected even when the provider fails, and rejects with its error', async () => {
-    const { invite } = receiveCall(`${prefix}=ben`);
+    const { invite } = receiveCall(`${prefix}_ben`);
     const failure = new NetworkError();
     adapter.failNext('reject', failure);
     const rejected = jest.fn();
@@ -123,7 +123,7 @@ describe('CallInvite', () => {
     ['hangs up', hangsUp, {}],
     ['fails', [{ type: 'ended', reason: 'failed', error: dropped, after: 1_000 }], { error: dropped }],
   ])('a call that %s before it is answered cancels the invite', (_, script, info) => {
-    const { invite } = receiveCall(`${prefix}=ben`, script);
+    const { invite } = receiveCall(`${prefix}_ben`, script);
     const cancelled = jest.fn();
     invite.on('cancelled', cancelled);
 
@@ -138,7 +138,7 @@ describe('CallInvite', () => {
     ['rejected', (invite) => invite.reject()],
     ['cancelled', () => jest.advanceTimersByTime(1_000)],
   ])('a %s invite fails accept with CallFailedError and ignores reject', async (_, finish) => {
-    const { invite } = receiveCall(`${prefix}=ben`, hangsUp);
+    const { invite } = receiveCall(`${prefix}_ben`, hangsUp);
     await finish(invite);
     const answer = jest.spyOn(adapter, 'answer');
     const reject = jest.spyOn(adapter, 'reject');
@@ -154,7 +154,7 @@ describe('CallInvite', () => {
     ['the caller hangs up', 'cancelled', () => jest.advanceTimersByTime(1_000)],
     ['the invite is rejected', 'rejected', (invite) => invite.reject()],
   ])('when %s during an answer, accept fails with CallFailedError', async (_, state, finish) => {
-    const { invite } = receiveCall(`${prefix}=ben`, hangsUp);
+    const { invite } = receiveCall(`${prefix}_ben`, hangsUp);
     let answer!: () => void;
     jest.spyOn(adapter, 'answer').mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
 

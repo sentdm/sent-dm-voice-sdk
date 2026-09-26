@@ -1,3 +1,5 @@
+import { attachProviderDetail } from './provider-detail';
+
 export type SentVoiceErrorCode =
   | 'TOKEN_EXPIRED'
   | 'TOKEN_INVALID'
@@ -13,14 +15,16 @@ export type SentVoiceErrorCode =
 
 export type SentVoiceErrorCategory = 'auth' | 'media' | 'signaling' | 'network' | 'validation' | 'capability';
 
-type ErrorDetails = { message?: string; providerDetail?: unknown };
+type ErrorDetails = {
+  message?: string;
+  /** The underlying provider error. It is reported to Sent and cannot be read from the error. */
+  providerDetail?: unknown;
+};
 
 export class SentVoiceError extends Error {
   readonly code: SentVoiceErrorCode;
   readonly category: SentVoiceErrorCategory;
   readonly retriable: boolean;
-  /** Raw provider error, for logs only. */
-  readonly providerDetail?: unknown;
 
   constructor({
     code,
@@ -33,7 +37,7 @@ export class SentVoiceError extends Error {
     this.code = code;
     this.category = category;
     this.retriable = retriable;
-    this.providerDetail = providerDetail;
+    attachProviderDetail(this, providerDetail);
   }
 }
 

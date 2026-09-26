@@ -2,7 +2,7 @@ import type { CallEvent, CallTarget, IncomingCall, ProviderAdapter } from '@sent
 import { voiceToken } from '../voice-token';
 
 const prefix = '0f8fad5b-d9cb-469f-a165-70867728950e';
-const caller = `${prefix}=agent-42`;
+const caller = `${prefix}_agent-42`;
 const phone: CallTarget = { kind: 'number', number: '+38349111222' };
 
 export function describeSharedAdapterTests<Adapter extends ProviderAdapter>(
@@ -26,9 +26,9 @@ export function describeSharedAdapterTests<Adapter extends ProviderAdapter>(
 
     test('calls to a user, a number and a room get distinct call ids', async () => {
       const callIds = [
-        await adapter.call({ kind: 'user', id: `${prefix}=ben` }),
+        await adapter.call({ kind: 'user', id: `${prefix}_ben` }),
         await adapter.call(phone),
-        await adapter.joinConference(`${prefix}=daily-standup`),
+        await adapter.joinConference(`${prefix}_daily-standup`),
       ];
 
       expect(new Set(callIds).size).toBe(3);

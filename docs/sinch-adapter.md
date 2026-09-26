@@ -25,7 +25,7 @@ the WebRTC bundle out of pages that never register. A load that fails rejects wi
 ## Registration
 
 - The token names the application key (`iss` is `//rtc.sinch.com/applications/{key}`) and the user id
-  (`sub` ends in `/users/{prefix}={identity}`).
+  (`sub` ends in `/users/{prefix}_{identity}`: the account id, one underscore, the identity; readers split on the first underscore, which an account id never contains).
 - The environment host is `ocra-euc1.api.sinch.com`. It has to match the region of the shared application: the
   prototype found that the global `ocra.api.sinch.com` did not route app-to-app signaling reliably to its EU
   application. Change the constant if the production application lives in another region.
@@ -155,17 +155,20 @@ Still unknown: how a phone that is busy or unanswered, and a call the backend re
 
 ## Error mapping
 
-| Where                        | Provider error                                               | Sent error                              |
-| ---------------------------- | ------------------------------------------------------------ | --------------------------------------- |
-| `import('sinch-rtc')`        | the module could not be loaded                               | `NetworkError`                          |
-| `call()`, `joinConference()` | no audio track in the outgoing stream (microphone refused)   | `MediaPermissionError`                  |
-| `answer()`                   | microphone tracks unavailable (_source:_ its only rejection) | `MediaPermissionError`                  |
-| call ended with `Failure`    | `SinchError` in the network domain, e.g. ICE failure (3002)  | `NetworkError`                          |
-| call ended with `Inactive`   |                                                              | `NetworkError`                          |
-| `setOutputDevice()`          | no `setSinkId` in the browser                                | `CapabilityUnsupportedError`            |
-| anything else                | see below                                                    | `SentVoiceError` `UNKNOWN`, `signaling` |
+| Where                        | Provider error                                                                                               | Sent error                              |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------- |
+| `import('sinch-rtc')`        | the module could not be loaded                                                                               | `NetworkError`                          |
+| `call()`, `joinConference()` | no audio track in the outgoing stream (microphone refused)                                                   | `MediaPermissionError`                  |
+| `answer()`                   | microphone tracks unavailable (_source:_ its only rejection)                                                 | `MediaPermissionError`                  |
+| call ended with `Failure`    | `SinchError` in the network domain, e.g. ICE failure (3002)                                                  | `NetworkError`                          |
+| call ended with `Failure`    | `Unable to connect call (<reason>)` from the Sinch backend; `destination user not found` has its own message | `CallFailedError`                       |
+| call ended with `Inactive`   |                                                                                                              | `NetworkError`                          |
+| `setOutputDevice()`          | no `setSinkId` in the browser                                                                                | `CapabilityUnsupportedError`            |
+| anything else                | see below                                                                                                    | `SentVoiceError` `UNKNOWN`, `signaling` |
 
-Unmapped errors keep the raw error in `providerDetail`. Known ones:
+Unmapped errors keep the raw error as provider detail, which apps cannot read from the error and which telemetry
+reports as `provider_error` (its `domain` is Sinch's `ErrorType`: 0 Generic, 1 Network, 2 Session, 3 Api,
+4 Persistence, 5 Sip, 6 Http). Known ones:
 
 - Registration failures. `sinch-rtc` reports every failed start as `Unable to create instance!` and only logs the
   cause, so a rejected token, a network failure and a push setup failure look alike.

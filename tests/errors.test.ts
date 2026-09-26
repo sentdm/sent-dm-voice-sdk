@@ -13,6 +13,7 @@ import {
   type SentVoiceErrorCategory,
   type SentVoiceErrorCode,
 } from '@sentdm/voice/errors';
+import { providerDetailOf } from '@sentdm/voice/provider-detail';
 
 type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
@@ -50,7 +51,7 @@ describe('error taxonomy', () => {
       expect(error.category).toBe(category);
       expect(error.retriable).toBe(retriable);
       expect(error.message).not.toBe('');
-      expect(error.providerDetail).toBeUndefined();
+      expect(providerDetailOf(error)).toBeUndefined();
     },
   );
 
@@ -59,7 +60,7 @@ describe('error taxonomy', () => {
     const error = new ErrorClass({ message: 'custom message', providerDetail });
 
     expect(error.message).toBe('custom message');
-    expect(error.providerDetail).toBe(providerDetail);
+    expect(providerDetailOf(error)).toBe(providerDetail);
   });
 
   test('unmapped errors use the base class with the UNKNOWN code', () => {
@@ -76,13 +77,22 @@ describe('error taxonomy', () => {
     expect(error.code).toBe('UNKNOWN');
     expect(error.category).toBe('signaling');
     expect(error.retriable).toBe(false);
-    expect(error.providerDetail).toBe(providerDetail);
+    expect(providerDetailOf(error)).toBe(providerDetail);
   });
 
-  test('providerDetail is typed unknown', () => {
-    const providerDetailIsUnknown: Equals<SentVoiceError['providerDetail'], unknown> = true;
+  test('the provider detail cannot be read from the error, in its type, its properties or its JSON', () => {
+    const providerDetail = new Error('SinchError: raw provider error');
+    const error = new CallFailedError({ providerDetail });
 
-    expect(providerDetailIsUnknown).toBe(true);
+    const hasNoProviderDetail: Equals<
+      'providerDetail' extends keyof SentVoiceError ? true : false,
+      false
+    > = true;
+    expect(hasNoProviderDetail).toBe(true);
+    expect(Object.getOwnPropertyNames(error)).not.toContain('providerDetail');
+    expect(Object.keys(error)).toEqual(['code', 'category', 'retriable']);
+    expect(JSON.stringify(error)).not.toContain('provider');
+    expect(providerDetailOf(error)).toBe(providerDetail);
   });
 
   test('the root entry exports the client and re-exports the same error classes', () => {

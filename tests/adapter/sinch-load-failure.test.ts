@@ -1,5 +1,6 @@
 import { loadSinchAdapter } from '@sentdm/voice/adapter/sinch';
 import { NetworkError } from '@sentdm/voice/errors';
+import { providerDetailOf } from '@sentdm/voice/provider-detail';
 
 const mockFailure = new TypeError('Failed to fetch dynamically imported module');
 
@@ -11,5 +12,6 @@ test('a provider that cannot be loaded rejects with NetworkError, keeping the ra
   const loading = loadSinchAdapter({});
 
   await expect(loading).rejects.toBeInstanceOf(NetworkError);
-  await expect(loading).rejects.toMatchObject({ providerDetail: mockFailure });
+  const error = await loading.catch((error: unknown) => error as NetworkError);
+  expect(providerDetailOf(error as NetworkError)).toBe(mockFailure);
 });

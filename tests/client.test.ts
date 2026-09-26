@@ -245,7 +245,7 @@ describe('SentVoice', () => {
   test('a live call survives a failed refresh', async () => {
     const client = createClient({ registerRetries: 0 });
     await client.register();
-    const callId = adapter.receiveCall(`${prefix}=ben`);
+    const callId = adapter.receiveCall(`${prefix}_ben`);
     await adapter.answer(callId);
     const callEvents: CallEvent[] = [];
     adapter.onCallEvent((event) => callEvents.push(event));
@@ -481,11 +481,11 @@ describe('SentVoice', () => {
       { kind: 'number', number: '+38349123456' },
       { kind: 'number', number: '+38349123456' },
     ],
-    ['an identity', 'ben', { kind: 'user', id: `${prefix}=ben` }, { kind: 'user', identity: 'ben' }],
+    ['an identity', 'ben', { kind: 'user', id: `${prefix}_ben` }, { kind: 'user', identity: 'ben' }],
     [
       'a 200-character identity',
       longestIdentity,
-      { kind: 'user', id: `${prefix}=${longestIdentity}` },
+      { kind: 'user', id: `${prefix}_${longestIdentity}` },
       { kind: 'user', identity: longestIdentity },
     ],
   ])('connect to %s dials it and returns the call addressed to it', async (_, to, target, address) => {
@@ -533,7 +533,7 @@ describe('SentVoice', () => {
       to: { kind: 'conference', name },
     });
 
-    expect(joinConference).toHaveBeenCalledWith(`${prefix}=${name}`);
+    expect(joinConference).toHaveBeenCalledWith(`${prefix}_${name}`);
   });
 
   test.each<[string, string]>([
@@ -590,7 +590,7 @@ describe('SentVoice', () => {
     expect(client).toMatchObject({ calls: [], activeCall: null, isBusy: false });
 
     const placed = await client.connect({ to: 'ben' });
-    adapter.receiveCall(`${prefix}=carol`);
+    adapter.receiveCall(`${prefix}_carol`);
     expect(client).toMatchObject({ calls: [placed], activeCall: placed, isBusy: true });
 
     const accepted = await invites[0]!.accept();
@@ -610,7 +610,7 @@ describe('SentVoice', () => {
     let invite!: SentVoice.CallInvite;
     client.on('incomingCall', (received) => (invite = received));
     const older = await client.connect({ to: 'ben' });
-    adapter.receiveCall(`${prefix}=carol`);
+    adapter.receiveCall(`${prefix}_carol`);
     const newer = await invite.accept();
 
     await newer.disconnect();
@@ -627,7 +627,7 @@ describe('SentVoice', () => {
     let invite!: SentVoice.CallInvite;
     client.on('incomingCall', (received) => (invite = received));
 
-    adapter.receiveCall(`${prefix}=carol`);
+    adapter.receiveCall(`${prefix}_carol`);
     await expect(client.connect({ to: 'ben' })).rejects.toMatchObject(busy);
     await invite.reject();
     const placed = await client.connect({ to: 'ben' });
@@ -648,7 +648,7 @@ describe('SentVoice', () => {
     const hangup = jest.spyOn(adapter, 'hangup');
 
     await client.unregister();
-    adapter.receiveCall(`${prefix}=carol`);
+    adapter.receiveCall(`${prefix}_carol`);
 
     expect(hangup).not.toHaveBeenCalled();
     expect(incomingCall).not.toHaveBeenCalled();
@@ -661,7 +661,7 @@ describe('SentVoice', () => {
     const invites: SentVoice.CallInvite[] = [];
     client.on('incomingCall', (invite) => invites.push(invite));
     const placed = await client.connect({ to: 'ben' });
-    adapter.receiveCall(`${prefix}=carol`);
+    adapter.receiveCall(`${prefix}_carol`);
     const accepted = await invites[0]!.accept();
     const pendingCallId = adapter.receiveCall('+38344555666');
     const hangup = jest.spyOn(adapter, 'hangup');

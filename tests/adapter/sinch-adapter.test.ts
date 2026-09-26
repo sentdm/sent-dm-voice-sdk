@@ -1,6 +1,7 @@
 import { loadSinchAdapter } from '@sentdm/voice/adapter/sinch';
 import type { AdapterOptions, CallEvent, CallTarget, ProviderAdapter } from '@sentdm/voice/adapter/types';
 import { CapabilityUnsupportedError, MediaPermissionError, SentVoiceError } from '@sentdm/voice/errors';
+import { providerDetailOf } from '@sentdm/voice/provider-detail';
 import { prefix, voiceToken } from '../voice-token';
 import { describeSharedAdapterTests } from './shared-adapter-tests';
 import {
@@ -22,9 +23,26 @@ Object.assign(globalThis, { Audio: FakeAudio });
 const phone: CallTarget = { kind: 'number', number: '+38349111222' };
 const unmapped = { code: 'UNKNOWN', category: 'signaling', retriable: false };
 const networkFailure = new SinchError('ICE failed to connect', 3002, ErrorType.Network);
-const httpFailure = new SinchError('Unable to connect call', 500, ErrorType.Http);
+const httpFailure = new SinchError('Internal error', 500, ErrorType.Http);
+const notRegistered = new SinchError(
+  'Unable to connect call (destination user not found)',
+  500,
+  ErrorType.Http,
+);
+const otherRefusal = new SinchError(
+  'Unable to connect call (some reason the SDK has not met)',
+  500,
+  ErrorType.Http,
+);
 
 const lastClient = () => clients[clients.length - 1]!;
+const rejection = (operation: Promise<unknown>): Promise<SentVoiceError> =>
+  operation.then(
+    () => {
+      throw new Error('The operation did not reject.');
+    },
+    (error: unknown) => error as SentVoiceError,
+  );
 const lastAudio = () => FakeAudio.created[FakeAudio.created.length - 1]!;
 
 describeSharedAdapterTests(
@@ -67,7 +85,7 @@ describe('SinchAdapter', () => {
       expect(lastClient()).toMatchObject({
         settings: {
           applicationKey: '0bb6f5e2-5ad1-4c3b-8b1b-5a0c1d2e3f40',
-          userId: `${prefix}=agent-42`,
+          userId: `${prefix}_agent-42`,
           environmentHost: 'ocra-euc1.api.sinch.com',
         },
         push,
@@ -113,10 +131,9 @@ describe('SinchAdapter', () => {
   ])('when %s, register rejects with the raw error kept and tears the client down', async (_, fail, log) => {
     const failure = fail();
 
-    await expect(adapter.register(voiceToken())).rejects.toMatchObject({
-      ...unmapped,
-      providerDetail: failure,
-    });
+    const error = await rejection(adapter.register(voiceToken()));
+    expect(error).toMatchObject(unmapped);
+    expect(providerDetailOf(error)).toBe(failure);
     expect(lastClient().log).toEqual(log);
 
     await adapter.register(voiceToken());
@@ -143,8 +160,8 @@ describe('SinchAdapter', () => {
     [
       [
         'a user',
-        (adapter) => adapter.call({ kind: 'user', id: `${prefix}=ben` }),
-        { method: 'callUser', destination: `${prefix}=ben` },
+        (adapter) => adapter.call({ kind: 'user', id: `${prefix}_ben` }),
+        { method: 'callUser', destination: `${prefix}_ben` },
       ],
       [
         'a phone number',
@@ -153,8 +170,8 @@ describe('SinchAdapter', () => {
       ],
       [
         'a conference room',
-        (adapter) => adapter.joinConference(`${prefix}=daily-standup`),
-        { method: 'callConference', destination: `${prefix}=daily-standup` },
+        (adapter) => adapter.joinConference(`${prefix}_daily-standup`),
+        { method: 'callConference', destination: `${prefix}_daily-standup` },
       ],
     ],
   )('a call to %s is placed with the matching provider call', async (_, place, placed) => {
@@ -220,16 +237,37 @@ describe('SinchAdapter', () => {
       'Failure on the network',
       CallEndCause.Failure,
       networkFailure,
+      { reason: 'failed', error: expect.objectContaining({ code: 'NETWORK' }) },
+    ],
+    [
+      'Failure the backend refused: destination not registered',
+      CallEndCause.Failure,
+      notRegistered,
       {
         reason: 'failed',
-        error: expect.objectContaining({ code: 'NETWORK', providerDetail: networkFailure }),
+        error: expect.objectContaining({
+          code: 'CALL_FAILED',
+          message: 'The destination is not registered.',
+        }),
+      },
+    ],
+    [
+      'Failure the backend refused for a reason without its own message',
+      CallEndCause.Failure,
+      otherRefusal,
+      {
+        reason: 'failed',
+        error: expect.objectContaining({
+          code: 'CALL_FAILED',
+          message: 'The call could not be connected.',
+        }),
       },
     ],
     [
       'Failure without a mapping',
       CallEndCause.Failure,
       httpFailure,
-      { reason: 'failed', error: expect.objectContaining({ ...unmapped, providerDetail: httpFailure }) },
+      { reason: 'failed', error: expect.objectContaining(unmapped) },
     ],
     [
       'Inactive',
@@ -237,33 +275,38 @@ describe('SinchAdapter', () => {
       undefined,
       { reason: 'failed', error: expect.objectContaining({ code: 'NETWORK' }) },
     ],
-  ])('a call the provider ends with %s ends as mapped', async (_, endCause, error, ended) => {
-    await adapter.register(voiceToken());
-    const callId = await adapter.call(phone);
+  ])(
+    'a call the provider ends with %s ends as mapped, keeping the raw error',
+    async (_, endCause, error, ended) => {
+      await adapter.register(voiceToken());
+      const callId = await adapter.call(phone);
 
-    calls.get(callId)!.end(endCause, error);
+      calls.get(callId)!.end(endCause, error);
 
-    expect(events).toEqual([{ callId, type: 'ended', ...ended }]);
-  });
+      expect(events).toEqual([{ callId, type: 'ended', ...ended }]);
+      const [event] = events as Array<Extract<CallEvent, { type: 'ended' }>>;
+      expect(event?.error && providerDetailOf(event.error)).toBe(error);
+    },
+  );
 
   test('an answer that cannot get the microphone rejects with MediaPermissionError', async () => {
     await adapter.register(voiceToken());
-    const call = lastClient().callClient.receiveCall(`${prefix}=ben`);
+    const call = lastClient().callClient.receiveCall(`${prefix}_ben`);
     const refused = new Error(
       'Could not get media tracks. Make sure you have granted required media permissions.',
     );
     call.answerFailure = refused;
 
-    const answering = adapter.answer(call.id);
+    const error = await rejection(adapter.answer(call.id));
 
-    await expect(answering).rejects.toBeInstanceOf(MediaPermissionError);
-    await expect(answering).rejects.toMatchObject({ providerDetail: refused });
+    expect(error).toBeInstanceOf(MediaPermissionError);
+    expect(providerDetailOf(error)).toBe(refused);
   });
 
   test('an answer retried within 1.5 s of a failed one waits until the provider accepts it again', async () => {
     jest.useFakeTimers();
     await adapter.register(voiceToken());
-    const call = lastClient().callClient.receiveCall(`${prefix}=ben`);
+    const call = lastClient().callClient.receiveCall(`${prefix}_ben`);
     const answer = jest.spyOn(call, 'answer');
     call.answerFailure = new Error('Could not get media tracks.');
     await expect(adapter.answer(call.id)).rejects.toBeInstanceOf(MediaPermissionError);
@@ -295,7 +338,7 @@ describe('SinchAdapter', () => {
 
   test('a call that has ended is not touched again, since the provider throws on a second hangup', async () => {
     await adapter.register(voiceToken());
-    const call = lastClient().callClient.receiveCall(`${prefix}=ben`);
+    const call = lastClient().callClient.receiveCall(`${prefix}_ben`);
     call.end(CallEndCause.Canceled);
 
     await expect(adapter.hangup(call.id)).resolves.toBeUndefined();
@@ -325,7 +368,8 @@ describe('SinchAdapter', () => {
     expect(unmute).toHaveBeenCalledTimes(1);
     expect(sendDtmf).toHaveBeenCalledWith('1#');
     expect(thrown).toBeInstanceOf(SentVoiceError);
-    expect(thrown).toMatchObject({ ...unmapped, providerDetail: expect.any(Error) });
+    expect(thrown).toMatchObject(unmapped);
+    expect(providerDetailOf(thrown as SentVoiceError)).toBeInstanceOf(Error);
   });
 
   test('getStats reads audio jitter, packet loss and round-trip time from the peer connection', async () => {
@@ -358,7 +402,7 @@ describe('SinchAdapter', () => {
     const element = new FakeAudio();
     await load({ audioElement: element as unknown as HTMLAudioElement });
     await adapter.register(voiceToken());
-    const call = lastClient().callClient.receiveCall(`${prefix}=ben`);
+    const call = lastClient().callClient.receiveCall(`${prefix}_ben`);
     expect(element.srcObject).toBeNull();
 
     await adapter.answer(call.id);

@@ -46,7 +46,7 @@ describe('AudioController', () => {
   const receiveCall = async (client: SentVoice) => {
     let invite!: SentVoice.CallInvite;
     client.once('incomingCall', (received) => (invite = received));
-    adapter.receiveCall(`${prefix}=carol`);
+    adapter.receiveCall(`${prefix}_carol`);
     await invite.reject();
   };
 

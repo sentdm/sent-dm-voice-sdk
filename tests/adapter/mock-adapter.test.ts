@@ -4,8 +4,8 @@ import { MockAdapter, type CallScript, type FailableMethod } from './mock-adapte
 import { describeSharedAdapterTests } from './shared-adapter-tests';
 
 const prefix = '0f8fad5b-d9cb-469f-a165-70867728950e';
-const caller = `${prefix}=agent-42`;
-const room = `${prefix}=daily-standup`;
+const caller = `${prefix}_agent-42`;
+const room = `${prefix}_daily-standup`;
 const phone: CallTarget = { kind: 'number', number: '+38349111222' };
 
 describeSharedAdapterTests(

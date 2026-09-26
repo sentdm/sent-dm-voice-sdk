@@ -18,10 +18,17 @@ describe('decodeToken', () => {
     });
   });
 
-  test('the prefix ends at the first =', () => {
-    const { prefix, identity } = decodeToken(voiceToken({ sub: `${issuer}/users/k3x9=agent=42` }));
+  test('splits on the first separator, so an identity may contain it', () => {
+    const { identity } = decodeToken(voiceToken({ sub: `${issuer}/users/${prefix}_agent_42_b` }));
 
-    expect({ prefix, identity }).toEqual({ prefix: 'k3x9', identity: 'agent=42' });
+    expect(identity).toBe('agent_42_b');
+  });
+
+  test('treats the prefix as opaque: any prefix without a separator is accepted', () => {
+    const token = decodeToken(voiceToken({ sub: `${issuer}/users/k3x9_agent-42` }));
+
+    expect(token.prefix).toBe('k3x9');
+    expect(token.identity).toBe('agent-42');
   });
 
   test.each<[string, unknown]>([
@@ -32,10 +39,12 @@ describe('decodeToken', () => {
     ['has no iat', voiceToken({ iat: undefined })],
     ['has an exp that is not a number', voiceToken({ exp: '1790079000' })],
     ['expires when it is issued', voiceToken({ iat: 1_790_078_400, exp: 1_790_078_400 })],
-    ['has a subject outside its issuer', voiceToken({ sub: `//elsewhere/users/${prefix}=agent-42` })],
+    ['has a subject outside its issuer', voiceToken({ sub: `//elsewhere/users/${prefix}_agent-42` })],
     ['has a userId without a prefix', voiceToken({ sub: `${issuer}/users/agent-42` })],
-    ['has an empty prefix', voiceToken({ sub: `${issuer}/users/=agent-42` })],
-    ['has an empty identity', voiceToken({ sub: `${issuer}/users/${prefix}=` })],
+    ['has an empty prefix', voiceToken({ sub: `${issuer}/users/_agent-42` })],
+    ['has no separator', voiceToken({ sub: `${issuer}/users/${prefix}agent-42` })],
+    ['uses the old = separator', voiceToken({ sub: `${issuer}/users/${prefix}=agent-42` })],
+    ['has an empty identity', voiceToken({ sub: `${issuer}/users/${prefix}_` })],
     ['has no bound number', voiceToken({ 'sent:number': undefined })],
     ['has an empty bound number', voiceToken({ 'sent:number': '' })],
   ])('a token that %s is a TokenInvalidError', (_, jwt) => {
