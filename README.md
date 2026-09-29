@@ -318,7 +318,7 @@ The SDK reports usage and call quality data to Sent, authenticated with the voic
 - for each call: its id, direction and outcome, how long it took to connect and how long it lasted, and at its end the average round-trip time, jitter and packet loss of samples taken every 10 seconds
 - the errors the client and its calls report: code, category, whether retriable, the message, and the underlying provider error with its name, message, stack and properties
 
-No audio, phone numbers or identities are added by the SDK; the underlying provider error travels as the provider produced it. Batches go to `https://api.sent.dm/v3/voice/telemetry` 3 seconds after the first event queued, so events that happen together share one request, and at once when a call ends, when the page is hidden and when the client is destroyed. A batch that fails, or that Sent refuses (for example with 404 while the telemetry endpoint is not deployed), is retried once, with the next batch or within 30 seconds, then dropped; telemetry never throws to your app and never delays a call. Turn it off with `telemetry: { disabled: true }`.
+No audio, phone numbers or identities are added by the SDK; the underlying provider error travels as the provider produced it. Batches go to `https://api.sent.dm/v3/voice/telemetry` 3 seconds after the first event queued, so events that happen together share one request, and at once when a call ends, when the page is hidden and when the client is destroyed. A batch that fails, or that Sent refuses (for example with a 429 or a 5xx), is retried once, with the next batch or within 30 seconds, then dropped; telemetry never throws to your app and never delays a call. Turn it off with `telemetry: { disabled: true }`.
 
 ## Browser realities
 

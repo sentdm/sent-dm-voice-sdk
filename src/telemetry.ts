@@ -53,8 +53,8 @@ interface Entry {
 }
 
 const defaultBaseURL = 'https://api.sent.dm';
-// Telemetry is best effort: a batch the API refuses (a 404 while the telemetry endpoint is not
-// deployed, a 429, a 5xx) or that never arrives is retried once with the next flush and then dropped.
+// Telemetry is best effort: a batch the API refuses (a 429, a 5xx) or that never arrives is retried
+// once with the next flush and then dropped.
 // Nothing here throws to the app or delays a call. The route follows the telemetry ingest PR.
 const path = '/v3/voice/telemetry';
 // A batch leaves this long after the first event queued for it, so events that happen together (a
