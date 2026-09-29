@@ -43,13 +43,13 @@ refusal from the customer's backend reaches the caller is still unknown (End cau
 
 ## Packaging
 
-| Area         | Plan                                                    | Ships                                                                                              | Disposition |
-| ------------ | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ----------- |
-| Exports      | `.`, `./react`, `./errors`                              | also `./sw.js`, the service worker apps serve                                                      | Approved    |
-| Dependencies | `sinch-rtc`, hidden                                     | also `bowser` for the telemetry device info, both pinned exact                                     | Approved    |
-| React        | unspecified                                             | optional peer `^18.0.0 \|\| ^19.0.0`                                                               | Approved    |
-| Repository   | `sentdm/sent-voice-typescript`, `packages/voice` layout | `sentdm/sent-dm-voice-sdk`, with the flat layout of `sent-dm-typescript`                           | Approved    |
-| Publishing   | `@sentdm/voice`, `0.x` during alpha                     | restricted access until launch, released by release-please from `main`, as in `sent-dm-typescript` | Approved    |
+| Area         | Plan                                                    | Ships                                                                                                          | Disposition |
+| ------------ | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ----------- |
+| Exports      | `.`, `./react`, `./errors`                              | also `./sw.js`, the service worker apps serve                                                                  | Approved    |
+| Dependencies | `sinch-rtc`, hidden                                     | also `bowser` for the telemetry device info, both pinned exact                                                 | Approved    |
+| React        | unspecified                                             | optional peer `^18.0.0 \|\| ^19.0.0`                                                                           | Approved    |
+| Repository   | `sentdm/sent-voice-typescript`, `packages/voice` layout | `sentdm/sent-dm-voice-sdk`, with the flat layout of `sent-dm-typescript`                                       | Approved    |
+| Publishing   | `@sentdm/voice`, `0.x` during alpha                     | public access from the first `0.x` release, released by release-please from `main`, as in `sent-dm-typescript` | Approved    |
 
 ## Exclusions
 
