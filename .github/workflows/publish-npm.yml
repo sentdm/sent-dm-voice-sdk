@@ -32,13 +32,5 @@ jobs:
           pnpm install
 
       - name: Publish to NPM
-        env:
-          # Bootstrap only. npm trusted publishing can only be configured once the
-          # package exists on the registry, so the first release publishes with a
-          # short-lived granular NPM_TOKEN repository secret. Delete the secret after
-          # configuring the trusted publisher for publish-npm.yml on npmjs.com, and
-          # bin/publish-npm authenticates with this job's OIDC token instead.
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: 'true'
         run: |
           bash bin/publish-npm
