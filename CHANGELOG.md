@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/sentdm/sent-dm-voice-sdk/compare/v0.1.0...v0.1.1) (2026-09-29)
+
+
+### Chores
+
+* publish through npm trusted publishing only ([5e1e674](https://github.com/sentdm/sent-dm-voice-sdk/commit/5e1e6747ade2fc2a5acf028a9a0dc21d17f59d61))
+
 ## [0.1.0](https://github.com/sentdm/sent-dm-voice-sdk/compare/v0.0.1...v0.1.0) (2026-09-29)
 
 
