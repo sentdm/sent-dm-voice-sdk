@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/sentdm/sent-dm-voice-sdk/compare/v0.1.1...v0.1.2) (2026-10-02)
+
+
+### Documentation
+
+* clarify incoming call handling ([931c309](https://github.com/sentdm/sent-dm-voice-sdk/commit/931c30926d6c60304516a92bacbe82c5aaed04e0))
+
 ## [0.1.1](https://github.com/sentdm/sent-dm-voice-sdk/compare/v0.1.0...v0.1.1) (2026-09-29)
 
 
