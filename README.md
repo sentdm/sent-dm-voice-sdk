@@ -99,7 +99,7 @@ client.on('offline', (reason) => console.warn(`Offline (${reason.code}), trying 
 
 ## Calls
 
-`connect({ to })` calls a phone number in E.164 format, like `'+14155551234'`, or another user of your app by identity, like `'ben'`. `joinConference({ name })` joins one of your account's rooms, named with letters, digits, `-` and `_`, up to 27 characters. Either throws a `SentVoiceError` with code `INVALID_ADDRESS` when `to` or `name` does not fit, and one with code `CALL_IN_PROGRESS` while a call is in progress or an incoming call is still waiting for an answer: the SDK handles one call at a time. Both open the microphone, and reject with a `MediaPermissionError` when the user refuses. `to` says who the user wants to reach; your backend's answer decides what rings.
+`connect({ to })` calls a phone number in E.164 format, like `'+14155551234'`, or another user of your app by identity, like `'ben'`. `joinConference({ name })` joins one of your account's rooms, named with letters, digits, `-` and `_`, up to 27 characters. Either throws a `SentVoiceError` with code `INVALID_ADDRESS` when `to` or `name` does not fit, and one with code `CALL_IN_PROGRESS` while a call is in progress or an incoming call is still waiting for an answer. Both open the microphone, and reject with a `MediaPermissionError` when the user refuses. `to` says who the user wants to reach; your backend's answer decides what rings.
 
 A leg to a phone number, whether the answer connects the call to a number or a phone participant is added through the API, runs for at most what your account's balance affords at the destination's per-minute rate, capped at four hours by the provider. Legs to app users and rooms have no such limit because they cost nothing. A call that reaches the cap ends as `completed`.
 
@@ -144,7 +144,7 @@ export function receiveCalls(client: SentVoice) {
 }
 ```
 
-The microphone opens when the call arrives, and `accept()` asks for permission again if that was refused, then resolves with the call. When the user refuses, it rejects with a `MediaPermissionError` and the invite stays pending, so the user can try again. `reject()` declines the call, and `cancelled` fires when the caller hangs up first. A call that arrives while another one is in progress is declined for you.
+The microphone opens when the call arrives, and `accept()` asks for permission again if that was refused, then resolves with the call. When the user refuses, it rejects with a `MediaPermissionError` and the invite stays pending, so the user can try again. `reject()` declines the call, and `cancelled` fires when the caller hangs up first. A call that arrives while another one is in progress still raises `incomingCall`; your handler decides whether to `accept()` it or `reject()` it. The call accepted last becomes `activeCall`.
 
 ### Call quality and reconnection
 
